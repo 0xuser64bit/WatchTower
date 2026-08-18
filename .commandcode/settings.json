@@ -5,7 +5,8 @@
       "Shell(cargo:*)",
       "Shell(rustup:*)",
       "Shell(git:*)",
-      "Shell(git add -A && git commit -F - <<'EOF' chore: initialize rust project with core dependencies Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
+      "Shell(git add -A && git commit -F - <<'EOF' chore: initialize rust project with core dependencies Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(git add -A && git commit -F - <<'EOF' feat: add typed configuration loader Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
     ],
     "deny": [],
     "defaultMode": "default"

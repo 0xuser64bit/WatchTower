@@ -1,3 +1,6 @@
+mod config;
+mod error;
+
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -5,7 +8,19 @@ use tracing_subscriber::EnvFilter;
 async fn main() {
     init_logging();
 
-    info!("ChainSentinel starting");
+    let settings = match config::Settings::load() {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(%err, "failed to load configuration");
+            std::process::exit(1);
+        }
+    };
+
+    info!(
+        poll_interval = settings.poll_interval_seconds,
+        rpc_endpoints = settings.solana_rpc_endpoints.len(),
+        "ChainSentinel starting"
+    );
 }
 
 fn init_logging() {
