@@ -38,7 +38,7 @@ pub async fn help(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
+    let _ctx = match auth::authorize(&db, &msg).await {
         Ok(ctx) => ctx,
         Err(crate::error::AppError::Unauthorized) => {
             auth::send_unauthorized(&bot, msg.chat.id).await;
@@ -50,7 +50,7 @@ pub async fn help(
         }
     };
 
-    let text = "ChainSentinel commands:\n/start - main menu\n/help - this help";
+    let text = "ChainSentinel commands:\n/start - main menu\n/help - this help\n/addtoken - add a token to track\n/tokens - list tracked tokens";
 
     let _ = bot.send_message(msg.chat.id, text).await?;
     Ok(())

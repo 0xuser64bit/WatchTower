@@ -1,4 +1,4 @@
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use std::str::FromStr;
