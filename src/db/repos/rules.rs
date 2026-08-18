@@ -108,23 +108,6 @@ impl<'a> RuleRepo<'a> {
         Ok(())
     }
 
-    pub async fn set_reference_value(&self, id: i64, value: f64) -> Result<()> {
-        let result = sqlx::query(
-            "UPDATE rules SET reference_value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
-             WHERE id = ? AND deleted_at IS NULL",
-        )
-        .bind(value)
-        .bind(id)
-        .execute(self.db.pool())
-        .await?;
-
-        if result.rows_affected() == 0 {
-            return Err(AppError::NotFound(format!("rule {id} not found")));
-        }
-
-        Ok(())
-    }
-
     pub async fn initialize_reference_if_missing(&self, id: i64, value: f64) -> Result<()> {
         sqlx::query(
             "UPDATE rules \

@@ -71,8 +71,4 @@ impl<'a> AlertEventRepo<'a> {
 
         Ok(events)
     }
-
-    pub async fn find_by_dedup_key_optional(&self, dedup_key: &str) -> Result<Option<AlertEvent>> {
-        self.find_by_dedup_key(dedup_key).await
-    }
 }
