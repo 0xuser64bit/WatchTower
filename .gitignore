@@ -1,0 +1,9 @@
+/target
+/.env
+/data/
+*.db
+*.db-wal
+*.db-shm
+.idea/
+.vscode/
+.DS_Store

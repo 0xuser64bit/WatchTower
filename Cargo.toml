@@ -1,0 +1,35 @@
+[package]
+name = "chainsentinel"
+version = "0.1.0"
+edition = "2021"
+description = "Private Telegram-controlled Solana monitoring and alerting platform"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+teloxide = { version = "0.12", default-features = false, features = ["macros", "rustls", "ctrlc_handler"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "chrono", "migrate"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+config = "0.14"
+dotenvy = "0.15"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+governor = "0.8"
+async-trait = "0.1"
+chrono = { version = "0.4", features = ["serde"] }
+bs58 = "0.5"
+base64 = "0.22"
+sha2 = "0.10"
+
+[dev-dependencies]
+mockito = "1"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
