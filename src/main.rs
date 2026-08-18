@@ -1,3 +1,4 @@
+mod alerts;
 mod config;
 mod db;
 mod error;
