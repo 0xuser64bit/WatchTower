@@ -19,6 +19,10 @@ pub enum Command {
     Addtoken,
     #[command(description = "list tracked tokens")]
     Tokens,
+    #[command(description = "add a wallet to track")]
+    Addwallet,
+    #[command(description = "list tracked wallets")]
+    Wallets,
     #[command(description = "add an alert rule")]
     Addalert,
     #[command(description = "list alert rules")]
@@ -35,6 +39,8 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         .branch(case![Command::Help].endpoint(commands::start::help))
         .branch(case![Command::Addtoken].endpoint(commands::tokens::start_add_token))
         .branch(case![Command::Tokens].endpoint(commands::tokens::list_tokens))
+        .branch(case![Command::Addwallet].endpoint(commands::wallets::start_add_wallet))
+        .branch(case![Command::Wallets].endpoint(commands::wallets::list_wallets))
         .branch(case![Command::Addalert].endpoint(commands::start_add_alert))
         .branch(case![Command::Alerts].endpoint(commands::alerts::list_alerts))
         .branch(case![Command::History].endpoint(commands::alerts::show_history));
@@ -59,6 +65,15 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         >()
         .branch(flows::add_alert::message_handler()),
     )
+    .branch(
+        dialogue::enter::<
+            Update,
+            InMemStorage<flows::add_wallet::AddWalletState>,
+            flows::add_wallet::AddWalletState,
+            _,
+        >()
+        .branch(flows::add_wallet::message_handler()),
+    )
     .branch(message_handler)
 }
 
@@ -67,7 +82,8 @@ pub async fn run(bot: Bot, db: Arc<Db>) {
         .dependencies(dptree::deps![
             db,
             InMemStorage::<flows::add_token::AddTokenState>::new(),
-            InMemStorage::<flows::add_alert::AddAlertState>::new()
+            InMemStorage::<flows::add_alert::AddAlertState>::new(),
+            InMemStorage::<flows::add_wallet::AddWalletState>::new()
         ])
         .enable_ctrlc_handler()
         .build()

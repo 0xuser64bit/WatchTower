@@ -16,7 +16,8 @@
       "Shell(git add -A && git commit -F - <<'EOF' feat: implement solana rpc provider with endpoint pool Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(git add -A && git commit -F - <<'EOF' feat: add rule engine with generic condition evaluation Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(cargo test 2>&1 | tail -15 && git add -A && git commit -F - <<'EOF' feat: add alert rule management flows Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
-      "Shell(git add -A && git commit -F - <<'EOF' feat: add alert dispatcher with dedup and cooldown Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
+      "Shell(git add -A && git commit -F - <<'EOF' feat: add alert dispatcher with dedup and cooldown Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(git add -A && git commit -F - <<'EOF' feat: add wallet tracking commands and flows Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
     ],
     "deny": [],
     "defaultMode": "default"

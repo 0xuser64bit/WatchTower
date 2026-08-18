@@ -1,6 +1,7 @@
 pub mod alerts;
 pub mod start;
 pub mod tokens;
+pub mod wallets;
 
 use crate::db::Db;
 use std::sync::Arc;
