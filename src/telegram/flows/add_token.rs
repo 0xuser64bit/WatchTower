@@ -93,7 +93,7 @@ async fn confirm(
 
     let repo = crate::db::repos::tokens::TokenRepo::new(&db);
 
-    match repo.create(&mint, symbol.as_deref(), None, decimals).await {
+    match repo.create(&mint, symbol.as_deref(), None).await {
         Ok(_) => {
             bot.send_message(msg.chat.id, "Token added successfully.").await?;
         }

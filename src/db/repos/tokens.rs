@@ -9,7 +9,6 @@ pub struct Token {
     pub mint_address: String,
     pub symbol: Option<String>,
     pub name: Option<String>,
-    pub decimals: i64,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
@@ -25,7 +24,7 @@ impl<'a> TokenRepo<'a> {
 
     pub async fn find_by_mint(&self, mint: &str) -> Result<Option<Token>> {
         let token = sqlx::query_as::<_, Token>(
-            "SELECT id, mint_address, symbol, name, decimals, created_at, deleted_at \
+            "SELECT id, mint_address, symbol, name, created_at, deleted_at \
              FROM tokens WHERE mint_address = ? AND deleted_at IS NULL",
         )
         .bind(mint)
@@ -37,7 +36,7 @@ impl<'a> TokenRepo<'a> {
 
     pub async fn find_by_id(&self, id: i64) -> Result<Option<Token>> {
         let token = sqlx::query_as::<_, Token>(
-            "SELECT id, mint_address, symbol, name, decimals, created_at, deleted_at \
+            "SELECT id, mint_address, symbol, name, created_at, deleted_at \
              FROM tokens WHERE id = ? AND deleted_at IS NULL",
         )
         .bind(id)
@@ -52,17 +51,13 @@ impl<'a> TokenRepo<'a> {
         mint_address: &str,
         symbol: Option<&str>,
         name: Option<&str>,
-        decimals: i64,
     ) -> Result<Token> {
-        sqlx::query(
-            "INSERT INTO tokens (mint_address, symbol, name, decimals) VALUES (?, ?, ?, ?)",
-        )
-        .bind(mint_address)
-        .bind(symbol)
-        .bind(name)
-        .bind(decimals)
-        .execute(self.db.pool())
-        .await?;
+        sqlx::query("INSERT INTO tokens (mint_address, symbol, name) VALUES (?, ?, ?)")
+            .bind(mint_address)
+            .bind(symbol)
+            .bind(name)
+            .execute(self.db.pool())
+            .await?;
 
         self.find_by_mint(mint_address)
             .await?
@@ -71,7 +66,7 @@ impl<'a> TokenRepo<'a> {
 
     pub async fn list(&self) -> Result<Vec<Token>> {
         let tokens = sqlx::query_as::<_, Token>(
-            "SELECT id, mint_address, symbol, name, decimals, created_at, deleted_at \
+            "SELECT id, mint_address, symbol, name, created_at, deleted_at \
              FROM tokens WHERE deleted_at IS NULL ORDER BY id DESC",
         )
         .fetch_all(self.db.pool())

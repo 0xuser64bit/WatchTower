@@ -23,7 +23,8 @@
       "Shell(rm:*)",
       "Shell(git add -A && git commit -F - <<'EOF' test: add integration and provider mock tests Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(cargo test 2>&1 | tail -12; git add -A && git commit -F - <<'EOF' chore: add systemd unit and deployment documentation Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
-      "Shell(git add -A && git commit -F - <<'EOF' fix: repair build, config loading, and shutdown signaling Add Display for Role so admin listing compiles. Remove broken config File source for .env and keep dotenvy/environment loading. Validate RPC commitment and cooldown settings. Create SQLite parent directory on connect. Wire SIGINT/SIGTERM cancellation and prune unused dependencies. Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
+      "Shell(git add -A && git commit -F - <<'EOF' fix: repair build, config loading, and shutdown signaling Add Display for Role so admin listing compiles. Remove broken config File source for .env and keep dotenvy/environment loading. Validate RPC commitment and cooldown settings. Create SQLite parent directory on connect. Wire SIGINT/SIGTERM cancellation and prune unused dependencies. Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(git add -A && git commit -F - <<'EOF' refactor: simplify schema and remove unused data model surface Rebuild tokens without the never-populated decimals column, drop the unused provider_state table, and constrain rules to price/balance. Remove Activity rule kind and corresponding dead branches. Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
     ],
     "deny": [],
     "defaultMode": "default"

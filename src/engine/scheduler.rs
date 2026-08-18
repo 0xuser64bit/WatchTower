@@ -1,7 +1,7 @@
 use crate::app_state::AppState;
 use crate::db::repos::rules::RuleRepo;
 use crate::providers::{ChainProvider, PriceProvider};
-use crate::rules::types::{Operator, RuleKind, RuleOutcome, Sample, TargetType};
+use crate::rules::types::{Operator, RuleKind, RuleOutcome, Sample};
 use crate::rules::evaluate;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -113,18 +113,6 @@ async fn fetch_sample(
             Ok(Some(Sample {
                 value,
                 reference: rule.reference_value,
-            }))
-        }
-        RuleKind::Activity => {
-            let signatures = state
-                .chain_provider
-                .get_recent_signatures(&rule.target_ref, 5)
-                .await?;
-
-            let activity = signatures.len() as f64;
-            Ok(Some(Sample {
-                value: activity,
-                reference: None,
             }))
         }
     }

@@ -6,7 +6,6 @@ pub fn format_alert(rule: &Rule, current: f64, threshold: f64) -> String {
     let reason = match rule.kind() {
         crate::rules::types::RuleKind::Price => "price crossed threshold",
         crate::rules::types::RuleKind::Balance => "balance crossed threshold",
-        crate::rules::types::RuleKind::Activity => "wallet activity detected",
     };
 
     format!(

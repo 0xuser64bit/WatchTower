@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::error::{AppError, Result};
-use crate::rules::types::{Rule, TargetType};
+use crate::rules::types::Rule;
 use chrono::{DateTime, Utc};
 
 pub struct RuleRepo<'a> {

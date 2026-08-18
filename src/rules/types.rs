@@ -5,7 +5,6 @@ use sqlx::FromRow;
 pub enum RuleKind {
     Price,
     Balance,
-    Activity,
 }
 
 impl RuleKind {
@@ -13,7 +12,6 @@ impl RuleKind {
         match self {
             RuleKind::Price => "price",
             RuleKind::Balance => "balance",
-            RuleKind::Activity => "activity",
         }
     }
 
@@ -21,7 +19,6 @@ impl RuleKind {
         match raw {
             "price" => Ok(RuleKind::Price),
             "balance" => Ok(RuleKind::Balance),
-            "activity" => Ok(RuleKind::Activity),
             other => Err(format!("unknown rule kind: {other}")),
         }
     }

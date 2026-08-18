@@ -34,10 +34,9 @@ async fn token_repo_soft_delete() {
     db.migrate().await.unwrap();
 
     let repo = chainsentinel::db::repos::tokens::TokenRepo::new(&db);
-    let token = repo.create("mint_address_12345678901234567890", Some("TKN"), None, 9).await.unwrap();
+    let token = repo.create("mint_address_12345678901234567890", Some("TKN"), None).await.unwrap();
 
     assert_eq!(token.symbol.as_deref(), Some("TKN"));
-    assert_eq!(token.decimals, 9);
 
     repo.soft_delete(token.id).await.unwrap();
     assert!(repo.find_by_id(token.id).await.unwrap().is_none());
