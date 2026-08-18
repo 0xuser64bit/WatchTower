@@ -7,6 +7,7 @@ use std::sync::Arc;
 use teloxide::dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler};
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommands;
+use tokio_util::sync::CancellationToken;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "Available commands:")]
@@ -77,16 +78,20 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
     .branch(message_handler)
 }
 
-pub async fn run(bot: Bot, db: Arc<Db>) {
-    Dispatcher::builder(bot, schema())
+pub async fn run(bot: Bot, db: Arc<Db>, shutdown: CancellationToken) {
+    let mut dispatcher = Dispatcher::builder(bot, schema())
         .dependencies(dptree::deps![
             db,
             InMemStorage::<flows::add_token::AddTokenState>::new(),
             InMemStorage::<flows::add_alert::AddAlertState>::new(),
             InMemStorage::<flows::add_wallet::AddWalletState>::new()
         ])
-        .enable_ctrlc_handler()
-        .build()
-        .dispatch()
-        .await;
+        .build();
+
+    tokio::select! {
+        _ = shutdown.cancelled() => {
+            tracing::info!("telegram dispatcher received shutdown signal");
+        }
+        _ = dispatcher.dispatch() => {}
+    }
 }

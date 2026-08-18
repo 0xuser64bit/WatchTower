@@ -1,6 +1,8 @@
 mod alerts;
+mod app_state;
 mod config;
 mod db;
+mod engine;
 mod error;
 mod providers;
 mod rules;
@@ -9,6 +11,8 @@ mod telegram;
 use crate::db::repos::users::{Role, UserRepo};
 use std::sync::Arc;
 use teloxide::prelude::*;
+use teloxide::types::ChatId;
+use tokio_util::sync::CancellationToken;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -44,6 +48,12 @@ async fn main() {
 
     let db = Arc::new(db);
     let bot = Bot::new(&settings.telegram_bot_token);
+    let settings = Arc::new(settings);
+    let shutdown = CancellationToken::new();
+
+    let state = app_state::AppState::new(db.clone(), bot.clone(), settings.clone(), shutdown.clone());
+
+    let admin_chat_id = ChatId(settings.admin_telegram_ids[0]);
 
     info!(
         poll_interval = settings.poll_interval_seconds,
@@ -51,7 +61,20 @@ async fn main() {
         "ChainSentinel starting"
     );
 
-    telegram::run(bot, db).await;
+    let bot_shutdown = shutdown.clone();
+    let bot_task = tokio::spawn(async move {
+        telegram::run(bot, db, bot_shutdown).await;
+    });
+
+    engine::scheduler::run(state, admin_chat_id).await;
+
+    shutdown.cancel();
+
+    if let Err(err) = bot_task.await {
+        tracing::error!(%err, "telegram task failed");
+    }
+
+    info!("ChainSentinel stopped");
 }
 
 async fn seed_admins(db: &db::Db, admin_ids: &[i64]) -> crate::error::Result<()> {
