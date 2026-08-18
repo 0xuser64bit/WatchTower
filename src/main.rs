@@ -3,6 +3,9 @@ mod db;
 mod error;
 mod telegram;
 
+use crate::db::repos::users::{Role, UserRepo};
+use std::sync::Arc;
+use teloxide::prelude::*;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -31,11 +34,34 @@ async fn main() {
         std::process::exit(1);
     }
 
+    if let Err(err) = seed_admins(&db, &settings.admin_telegram_ids).await {
+        tracing::error!(%err, "failed to seed admin users");
+        std::process::exit(1);
+    }
+
+    let db = Arc::new(db);
+    let bot = Bot::new(&settings.telegram_bot_token);
+
     info!(
         poll_interval = settings.poll_interval_seconds,
         rpc_endpoints = settings.solana_rpc_endpoints.len(),
         "ChainSentinel starting"
     );
+
+    telegram::run(bot, db).await;
+}
+
+async fn seed_admins(db: &db::Db, admin_ids: &[i64]) -> crate::error::Result<()> {
+    let repo = UserRepo::new(db);
+
+    for telegram_id in admin_ids {
+        if repo.find_by_telegram_id(*telegram_id).await?.is_none() {
+            repo.create(*telegram_id, Role::Admin).await?;
+            info!(telegram_id, "seeded admin user");
+        }
+    }
+
+    Ok(())
 }
 
 fn init_logging() {
