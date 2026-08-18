@@ -1,6 +1,5 @@
 use crate::error::{AppError, Result};
-use config::{Config, Environment, File};
-use std::path::Path;
+use config::{Config, Environment};
 
 #[derive(Debug, Clone)]
 pub struct Settings {
@@ -24,12 +23,6 @@ impl Settings {
             .set_default("SOLANA_RPC_COMMITMENT", "confirmed")?
             .set_default("POLL_INTERVAL_SECONDS", 60)?
             .set_default("ALERT_DEFAULT_COOLDOWN_SECONDS", 300)?;
-
-        let builder = if Path::new(".env").exists() {
-            builder.add_source(File::with_name(".env"))
-        } else {
-            builder
-        };
 
         let cfg = builder
             .add_source(Environment::with_prefix("").separator("__"))
@@ -73,6 +66,21 @@ impl Settings {
         if self.poll_interval_seconds == 0 {
             return Err(AppError::Config(config::ConfigError::Message(
                 "POLL_INTERVAL_SECONDS must be greater than zero".into(),
+            )));
+        }
+
+        if !matches!(
+            self.solana_rpc_commitment.as_str(),
+            "processed" | "confirmed" | "finalized"
+        ) {
+            return Err(AppError::Config(config::ConfigError::Message(
+                "SOLANA_RPC_COMMITMENT must be processed, confirmed, or finalized".into(),
+            )));
+        }
+
+        if self.alert_default_cooldown_seconds < 0 {
+            return Err(AppError::Config(config::ConfigError::Message(
+                "ALERT_DEFAULT_COOLDOWN_SECONDS must be zero or greater".into(),
             )));
         }
 

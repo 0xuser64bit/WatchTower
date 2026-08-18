@@ -74,9 +74,16 @@ async fn async_main() {
         telegram::run(bot, db, bot_shutdown).await;
     });
 
+    let signal_shutdown = shutdown.clone();
+    let signal_task = tokio::spawn(async move {
+        wait_for_shutdown_signal().await;
+        signal_shutdown.cancel();
+    });
+
     engine::scheduler::run(state, admin_chat_id).await;
 
     shutdown.cancel();
+    let _ = signal_task.await;
 
     if let Err(err) = bot_task.await {
         tracing::error!(%err, "telegram task failed");
@@ -96,6 +103,41 @@ async fn seed_admins(db: &db::Db, admin_ids: &[i64]) -> crate::error::Result<()>
     }
 
     Ok(())
+}
+
+async fn wait_for_shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut sigterm = match signal(SignalKind::terminate()) {
+            Ok(signal) => signal,
+            Err(err) => {
+                tracing::warn!(%err, "failed to install SIGTERM handler");
+                return;
+            }
+        };
+
+        let mut sigint = match signal(SignalKind::interrupt()) {
+            Ok(signal) => signal,
+            Err(err) => {
+                tracing::warn!(%err, "failed to install SIGINT handler");
+                return;
+            }
+        };
+
+        tokio::select! {
+            _ = sigterm.recv() => tracing::info!("received SIGTERM"),
+            _ = sigint.recv() => tracing::info!("received SIGINT"),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            tracing::warn!(%err, "failed to install Ctrl+C handler");
+        }
+    }
 }
 
 fn init_logging() {

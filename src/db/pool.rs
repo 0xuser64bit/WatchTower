@@ -1,6 +1,7 @@
 use crate::error::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -11,6 +12,8 @@ pub struct Db {
 
 impl Db {
     pub async fn connect(database_url: &str) -> Result<Self> {
+        create_database_parent(database_url)?;
+
         let options = SqliteConnectOptions::from_str(database_url)
             .map_err(sqlx::Error::from)?
             .create_if_missing(true)
@@ -48,4 +51,22 @@ impl Db {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
+}
+
+fn create_database_parent(database_url: &str) -> Result<()> {
+    let Some(path) = database_url
+        .strip_prefix("sqlite://")
+        .or_else(|| database_url.strip_prefix("sqlite:"))
+    else {
+        return Ok(());
+    };
+
+    let path = Path::new(path);
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    Ok(())
 }
