@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod error;
+mod telegram;
 
 use tracing::info;
 use tracing_subscriber::EnvFilter;
