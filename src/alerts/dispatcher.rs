@@ -83,7 +83,11 @@ impl AlertDispatcher {
         }
 
         for admin in admins {
-            if let Err(err) = self.bot.send_message(ChatId(admin.telegram_id), &message).await {
+            if let Err(err) = self
+                .bot
+                .send_message(ChatId(admin.telegram_id), &message)
+                .await
+            {
                 warn!(telegram_id = admin.telegram_id, %err, "failed to send telegram alert");
             }
         }

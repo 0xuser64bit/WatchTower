@@ -12,8 +12,13 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub enum AddWalletState {
     #[default]
     AwaitingAddress,
-    AwaitingLabel { address: String },
-    Confirm { address: String, label: Option<String> },
+    AwaitingLabel {
+        address: String,
+    },
+    Confirm {
+        address: String,
+        label: Option<String>,
+    },
 }
 
 pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
@@ -27,17 +32,22 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
 
 async fn await_address(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
     let Some(address) = msg.text().map(|s| s.trim().to_string()) else {
-        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.").await?;
+        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.")
+            .await?;
         return Ok(());
     };
 
     if !crate::providers::solana::validation::is_valid_base58_address(&address) {
-        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.").await?;
+        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.")
+            .await?;
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Optional label? Send `-` to skip.").await?;
-    dialogue.update(AddWalletState::AwaitingLabel { address }).await?;
+    bot.send_message(msg.chat.id, "Optional label? Send `-` to skip.")
+        .await?;
+    dialogue
+        .update(AddWalletState::AwaitingLabel { address })
+        .await?;
     Ok(())
 }
 
@@ -83,12 +93,17 @@ async fn confirm(
         return Ok(());
     }
 
-    match WalletRepo::new(&db).create(&address, label.as_deref()).await {
+    match WalletRepo::new(&db)
+        .create(&address, label.as_deref())
+        .await
+    {
         Ok(_) => {
-            bot.send_message(msg.chat.id, "Wallet added successfully.").await?;
+            bot.send_message(msg.chat.id, "Wallet added successfully.")
+                .await?;
         }
         Err(_) => {
-            bot.send_message(msg.chat.id, "Failed to add wallet.").await?;
+            bot.send_message(msg.chat.id, "Failed to add wallet.")
+                .await?;
         }
     }
 

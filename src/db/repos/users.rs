@@ -129,11 +129,7 @@ impl<'a> UserRepo<'a> {
     }
 
     pub async fn set_blocked(&self, telegram_id: i64, blocked: bool) -> Result<()> {
-        let blocked_at = if blocked {
-            Some(Utc::now())
-        } else {
-            None
-        };
+        let blocked_at = if blocked { Some(Utc::now()) } else { None };
 
         let result = sqlx::query(
             "UPDATE users SET blocked_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \

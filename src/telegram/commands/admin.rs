@@ -9,7 +9,10 @@ pub async fn admin_menu(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
@@ -24,7 +27,10 @@ pub async fn list_users(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
@@ -38,7 +44,8 @@ pub async fn list_users(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Users:\n{text}")).await?;
+    bot.send_message(msg.chat.id, format!("Users:\n{text}"))
+        .await?;
     Ok(())
 }
 
@@ -48,14 +55,18 @@ pub async fn add_admin(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /addadmin <telegram_id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /addadmin <telegram_id>")
+                .await?;
             return Ok(());
         }
     };
@@ -64,7 +75,8 @@ pub async fn add_admin(
     match repo.find_by_telegram_id(target_id).await? {
         Some(_) => {
             repo.set_role(target_id, Role::Admin).await?;
-            bot.send_message(msg.chat.id, "User promoted to admin.").await?;
+            bot.send_message(msg.chat.id, "User promoted to admin.")
+                .await?;
         }
         None => {
             repo.create(target_id, Role::Admin).await?;
@@ -81,14 +93,18 @@ pub async fn demote_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /demote <telegram_id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /demote <telegram_id>")
+                .await?;
             return Ok(());
         }
     };
@@ -104,14 +120,18 @@ pub async fn block_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /block <telegram_id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /block <telegram_id>")
+                .await?;
             return Ok(());
         }
     };
@@ -127,14 +147,18 @@ pub async fn unblock_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
+    if auth::authorize_admin_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /unblock <telegram_id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /unblock <telegram_id>")
+                .await?;
             return Ok(());
         }
     };

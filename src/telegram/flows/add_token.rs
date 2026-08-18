@@ -12,8 +12,13 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub enum AddTokenState {
     #[default]
     AwaitingMint,
-    AwaitingSymbol { mint: String },
-    Confirm { mint: String, symbol: Option<String> },
+    AwaitingSymbol {
+        mint: String,
+    },
+    Confirm {
+        mint: String,
+        symbol: Option<String>,
+    },
 }
 
 pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
@@ -27,16 +32,25 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
 
 async fn await_mint(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
     let Some(text) = msg.text().map(|s| s.trim().to_string()) else {
-        bot.send_message(msg.chat.id, "Please send a valid Solana mint address.").await?;
+        bot.send_message(msg.chat.id, "Please send a valid Solana mint address.")
+            .await?;
         return Ok(());
     };
 
     if !crate::providers::solana::validation::is_valid_base58_address(&text) {
-        bot.send_message(msg.chat.id, "That does not look like a valid Solana mint address.").await?;
+        bot.send_message(
+            msg.chat.id,
+            "That does not look like a valid Solana mint address.",
+        )
+        .await?;
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Mint received. Optional symbol? Send `-` to skip.").await?;
+    bot.send_message(
+        msg.chat.id,
+        "Mint received. Optional symbol? Send `-` to skip.",
+    )
+    .await?;
 
     dialogue
         .update(AddTokenState::AwaitingSymbol { mint: text })
@@ -84,12 +98,17 @@ async fn confirm(
         return Ok(());
     }
 
-    match TokenRepo::new(&db).create(&mint, symbol.as_deref(), None).await {
+    match TokenRepo::new(&db)
+        .create(&mint, symbol.as_deref(), None)
+        .await
+    {
         Ok(_) => {
-            bot.send_message(msg.chat.id, "Token added successfully.").await?;
+            bot.send_message(msg.chat.id, "Token added successfully.")
+                .await?;
         }
         Err(_) => {
-            bot.send_message(msg.chat.id, "Failed to add token.").await?;
+            bot.send_message(msg.chat.id, "Failed to add token.")
+                .await?;
         }
     }
 

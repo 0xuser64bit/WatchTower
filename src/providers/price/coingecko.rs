@@ -105,18 +105,19 @@ impl PriceProvider for CoinGeckoProvider {
     async fn get_native_price_usd(&self) -> ProviderResult<f64> {
         let mut last_err = None;
 
-        for url in std::iter::once(self.base_url.as_str())
-            .chain(self.fallback_candidates("solana").iter().map(String::as_str))
-        {
+        for url in std::iter::once(self.base_url.as_str()).chain(
+            self.fallback_candidates("solana")
+                .iter()
+                .map(String::as_str),
+        ) {
             match self.fetch_native(url).await {
                 Ok(price) => return Ok(price),
                 Err(err) => last_err = Some(err),
             }
         }
 
-        Err(last_err.unwrap_or_else(|| {
-            ProviderError::Unavailable("no price provider available".into())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| ProviderError::Unavailable("no price provider available".into())))
     }
 
     async fn get_token_price_usd(&self, mint: &str) -> ProviderResult<f64> {
@@ -131,8 +132,7 @@ impl PriceProvider for CoinGeckoProvider {
             }
         }
 
-        Err(last_err.unwrap_or_else(|| {
-            ProviderError::Unavailable("no price provider available".into())
-        }))
+        Err(last_err
+            .unwrap_or_else(|| ProviderError::Unavailable("no price provider available".into())))
     }
 }

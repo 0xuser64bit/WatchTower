@@ -68,21 +68,29 @@ impl SolanaRpcProvider {
     fn select_endpoint(&self) -> ProviderResult<usize> {
         let len = self.endpoints.len();
         if len == 0 {
-            return Err(ProviderError::Unavailable("no RPC endpoints configured".into()));
+            return Err(ProviderError::Unavailable(
+                "no RPC endpoints configured".into(),
+            ));
         }
 
         for _ in 0..len {
             let index = self.next_index.fetch_add(1, Ordering::Relaxed) % len;
             let endpoint = &self.endpoints[index];
 
-            if *endpoint.healthy.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
+            if *endpoint
+                .healthy
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+            {
                 return Ok(index);
             }
 
             self.maybe_re_enable(index);
         }
 
-        Err(ProviderError::Unavailable("all RPC endpoints are unhealthy".into()))
+        Err(ProviderError::Unavailable(
+            "all RPC endpoints are unhealthy".into(),
+        ))
     }
 
     fn maybe_re_enable(&self, index: usize) {

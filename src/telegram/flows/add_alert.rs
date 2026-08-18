@@ -12,10 +12,24 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub enum AddAlertState {
     #[default]
     AwaitingKind,
-    AwaitingTarget { kind: String },
-    AwaitingOperator { kind: String, target: String },
-    AwaitingThreshold { kind: String, target: String, operator: String },
-    Confirm { kind: String, target: String, operator: String, threshold: f64 },
+    AwaitingTarget {
+        kind: String,
+    },
+    AwaitingOperator {
+        kind: String,
+        target: String,
+    },
+    AwaitingThreshold {
+        kind: String,
+        target: String,
+        operator: String,
+    },
+    Confirm {
+        kind: String,
+        target: String,
+        operator: String,
+        threshold: f64,
+    },
 }
 
 pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
@@ -25,18 +39,35 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
         .branch(case![AddAlertState::AwaitingKind].endpoint(await_kind))
         .branch(case![AddAlertState::AwaitingTarget { kind }].endpoint(await_target))
         .branch(case![AddAlertState::AwaitingOperator { kind, target }].endpoint(await_operator))
-        .branch(case![AddAlertState::AwaitingThreshold { kind, target, operator }].endpoint(await_threshold))
-        .branch(case![AddAlertState::Confirm { kind, target, operator, threshold }].endpoint(confirm))
+        .branch(
+            case![AddAlertState::AwaitingThreshold {
+                kind,
+                target,
+                operator
+            }]
+            .endpoint(await_threshold),
+        )
+        .branch(
+            case![AddAlertState::Confirm {
+                kind,
+                target,
+                operator,
+                threshold
+            }]
+            .endpoint(confirm),
+        )
 }
 
 async fn await_kind(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
     let Some(text) = msg.text().map(|s| s.trim().to_lowercase()) else {
-        bot.send_message(msg.chat.id, "Send the alert kind: `price` or `balance`.").await?;
+        bot.send_message(msg.chat.id, "Send the alert kind: `price` or `balance`.")
+            .await?;
         return Ok(());
     };
 
     if text != "price" && text != "balance" {
-        bot.send_message(msg.chat.id, "Kind must be `price` or `balance`.").await?;
+        bot.send_message(msg.chat.id, "Kind must be `price` or `balance`.")
+            .await?;
         return Ok(());
     }
 
@@ -47,7 +78,9 @@ async fn await_kind(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerRe
     };
 
     bot.send_message(msg.chat.id, prompt).await?;
-    dialogue.update(AddAlertState::AwaitingTarget { kind: text }).await?;
+    dialogue
+        .update(AddAlertState::AwaitingTarget { kind: text })
+        .await?;
     Ok(())
 }
 
@@ -58,17 +91,25 @@ async fn await_target(
     kind: String,
 ) -> HandlerResult {
     let Some(target) = msg.text().map(|s| s.trim().to_string()) else {
-        bot.send_message(msg.chat.id, "Send a valid Solana address.").await?;
+        bot.send_message(msg.chat.id, "Send a valid Solana address.")
+            .await?;
         return Ok(());
     };
 
     if !crate::providers::solana::validation::is_valid_base58_address(&target) {
-        bot.send_message(msg.chat.id, "Send a valid Solana address.").await?;
+        bot.send_message(msg.chat.id, "Send a valid Solana address.")
+            .await?;
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Send the operator: `>`, `<`, `>=`, `<=`, `%up`, or `%down`.").await?;
-    dialogue.update(AddAlertState::AwaitingOperator { kind, target }).await?;
+    bot.send_message(
+        msg.chat.id,
+        "Send the operator: `>`, `<`, `>=`, `<=`, `%up`, or `%down`.",
+    )
+    .await?;
+    dialogue
+        .update(AddAlertState::AwaitingOperator { kind, target })
+        .await?;
     Ok(())
 }
 
@@ -80,7 +121,8 @@ async fn await_operator(
     target: String,
 ) -> HandlerResult {
     let Some(operator) = msg.text().map(|s| s.trim().to_lowercase()) else {
-        bot.send_message(msg.chat.id, "Send a valid operator.").await?;
+        bot.send_message(msg.chat.id, "Send a valid operator.")
+            .await?;
         return Ok(());
     };
 
@@ -90,8 +132,15 @@ async fn await_operator(
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Send the numeric threshold.").await?;
-    dialogue.update(AddAlertState::AwaitingThreshold { kind, target, operator }).await?;
+    bot.send_message(msg.chat.id, "Send the numeric threshold.")
+        .await?;
+    dialogue
+        .update(AddAlertState::AwaitingThreshold {
+            kind,
+            target,
+            operator,
+        })
+        .await?;
     Ok(())
 }
 
@@ -104,12 +153,14 @@ async fn await_threshold(
     operator: String,
 ) -> HandlerResult {
     let Some(threshold) = msg.text().and_then(|s| s.trim().parse::<f64>().ok()) else {
-        bot.send_message(msg.chat.id, "Send a positive numeric threshold.").await?;
+        bot.send_message(msg.chat.id, "Send a positive numeric threshold.")
+            .await?;
         return Ok(());
     };
 
     if !threshold.is_finite() || threshold <= 0.0 {
-        bot.send_message(msg.chat.id, "Send a positive numeric threshold.").await?;
+        bot.send_message(msg.chat.id, "Send a positive numeric threshold.")
+            .await?;
         return Ok(());
     }
 
@@ -120,11 +171,17 @@ async fn await_threshold(
     .await?;
 
     dialogue
-        .update(AddAlertState::Confirm { kind, target, operator, threshold })
+        .update(AddAlertState::Confirm {
+            kind,
+            target,
+            operator,
+            threshold,
+        })
         .await?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn confirm(
     bot: Bot,
     dialogue: FlowDialogue,
@@ -165,7 +222,8 @@ async fn confirm(
             bot.send_message(msg.chat.id, "Alert rule created.").await?;
         }
         Err(_) => {
-            bot.send_message(msg.chat.id, "Failed to create alert rule.").await?;
+            bot.send_message(msg.chat.id, "Failed to create alert rule.")
+                .await?;
         }
     }
 

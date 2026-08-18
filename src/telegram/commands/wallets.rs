@@ -9,13 +9,17 @@ pub async fn start_add_wallet(
     bot: Bot,
     db: Arc<Db>,
     msg: Message,
-    dialogue: Dialogue<crate::telegram::flows::add_wallet::AddWalletState, InMemStorage<crate::telegram::flows::add_wallet::AddWalletState>>,
+    dialogue: Dialogue<
+        crate::telegram::flows::add_wallet::AddWalletState,
+        InMemStorage<crate::telegram::flows::add_wallet::AddWalletState>,
+    >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Send the Solana wallet address to track.").await?;
+    bot.send_message(msg.chat.id, "Send the Solana wallet address to track.")
+        .await?;
 
     dialogue
         .update(crate::telegram::flows::add_wallet::AddWalletState::AwaitingAddress)
@@ -36,8 +40,11 @@ pub async fn list_wallets(
     let wallets = WalletRepo::new(&db).list().await?;
 
     if wallets.is_empty() {
-        bot.send_message(msg.chat.id, "No wallets tracked yet. Use /addwallet to add one.")
-            .await?;
+        bot.send_message(
+            msg.chat.id,
+            "No wallets tracked yet. Use /addwallet to add one.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -72,7 +79,8 @@ pub async fn delete_wallet(
     let id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /deletewallet <id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /deletewallet <id>")
+                .await?;
             return Ok(());
         }
     };

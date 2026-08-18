@@ -9,14 +9,20 @@ pub async fn start_add_token(
     bot: Bot,
     db: Arc<Db>,
     msg: Message,
-    dialogue: Dialogue<crate::telegram::flows::add_token::AddTokenState, InMemStorage<crate::telegram::flows::add_token::AddTokenState>>,
+    dialogue: Dialogue<
+        crate::telegram::flows::add_token::AddTokenState,
+        InMemStorage<crate::telegram::flows::add_token::AddTokenState>,
+    >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Send the Solana mint address of the token you want to track.")
-        .await?;
+    bot.send_message(
+        msg.chat.id,
+        "Send the Solana mint address of the token you want to track.",
+    )
+    .await?;
 
     dialogue
         .update(crate::telegram::flows::add_token::AddTokenState::AwaitingMint)
@@ -37,8 +43,11 @@ pub async fn list_tokens(
     let tokens = TokenRepo::new(&db).list().await?;
 
     if tokens.is_empty() {
-        bot.send_message(msg.chat.id, "No tokens tracked yet. Use /addtoken to add one.")
-            .await?;
+        bot.send_message(
+            msg.chat.id,
+            "No tokens tracked yet. Use /addtoken to add one.",
+        )
+        .await?;
         return Ok(());
     }
 
@@ -73,7 +82,8 @@ pub async fn delete_token(
     let id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /deletetoken <id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /deletetoken <id>")
+                .await?;
             return Ok(());
         }
     };

@@ -12,7 +12,10 @@ const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
 pub async fn run(state: AppState, admin_chat_id: ChatId) {
     let interval = Duration::from_secs(state.settings.poll_interval_seconds);
 
-    info!(interval_secs = interval.as_secs(), "monitoring engine started");
+    info!(
+        interval_secs = interval.as_secs(),
+        "monitoring engine started"
+    );
 
     let mut ticker = tokio::time::interval(interval);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
@@ -106,4 +109,124 @@ fn is_percentage_rule(rule: &crate::rules::types::Rule) -> bool {
         rule.operator(),
         Operator::PctChangeUp | Operator::PctChangeDown
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app_state::AppState;
+    use crate::config::Settings;
+    use crate::db::Db;
+    use crate::providers::{ChainProvider, PriceProvider, ProviderResult};
+    use async_trait::async_trait;
+    use std::sync::Arc;
+    use teloxide::Bot;
+    use tokio_util::sync::CancellationToken;
+
+    struct MockPrice {
+        token: f64,
+    }
+
+    #[async_trait]
+    impl PriceProvider for MockPrice {
+        async fn get_native_price_usd(&self) -> ProviderResult<f64> {
+            Ok(self.token)
+        }
+
+        async fn get_token_price_usd(&self, _mint: &str) -> ProviderResult<f64> {
+            Ok(self.token)
+        }
+    }
+
+    struct MockChain {
+        lamports: u64,
+    }
+
+    #[async_trait]
+    impl ChainProvider for MockChain {
+        async fn get_native_balance_lamports(&self, _address: &str) -> ProviderResult<u64> {
+            Ok(self.lamports)
+        }
+    }
+
+    fn settings() -> Arc<Settings> {
+        Arc::new(Settings {
+            telegram_bot_token: "test".into(),
+            admin_telegram_ids: vec![1],
+            database_url: "sqlite::memory:".into(),
+            coingecko_api_url: "http://localhost".into(),
+            price_fallback_urls: vec![],
+            solana_rpc_endpoints: vec!["http://localhost".into()],
+            solana_rpc_commitment: "confirmed".into(),
+            poll_interval_seconds: 60,
+            alert_default_cooldown_seconds: 300,
+        })
+    }
+
+    fn state(db: Arc<Db>, price: f64, lamports: u64) -> AppState {
+        let bot = Bot::new("test");
+        AppState::new(
+            db.clone(),
+            bot,
+            settings(),
+            Arc::new(MockPrice { token: price }),
+            Arc::new(MockChain { lamports }),
+            CancellationToken::new(),
+        )
+    }
+
+    fn rule(operator: &str, kind: &str, target_type: &str) -> crate::rules::types::Rule {
+        use chrono::Utc;
+        crate::rules::types::Rule {
+            id: 1,
+            kind: kind.into(),
+            target_type: target_type.into(),
+            target_ref: "addr".into(),
+            metric: if kind == "price" { "price" } else { "balance" }.into(),
+            operator: operator.into(),
+            threshold: 10.0,
+            time_window_seconds: None,
+            cooldown_seconds: 300,
+            max_triggers: None,
+            reference_value: None,
+            enabled: 1,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            deleted_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_sample_returns_sol_for_balance() {
+        let db = Arc::new(Db::connect_in_memory().await.unwrap());
+        db.migrate().await.unwrap();
+        let state = state(db, 2.0, 2_500_000_000);
+        let rule = rule(">", "balance", "wallet");
+
+        let sample = fetch_sample(&state, &rule, &mut HashMap::new())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(sample.value, 2.5);
+    }
+
+    #[tokio::test]
+    async fn fetch_sample_caches_token_prices() {
+        let db = Arc::new(Db::connect_in_memory().await.unwrap());
+        db.migrate().await.unwrap();
+        let state = state(db, 4.0, 0);
+        let rule = rule(">", "price", "token");
+        let mut cache = HashMap::new();
+
+        let first = fetch_sample(&state, &rule, &mut cache)
+            .await
+            .unwrap()
+            .unwrap();
+        let second = fetch_sample(&state, &rule, &mut cache)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.value, 4.0);
+        assert_eq!(second.value, 4.0);
+    }
 }

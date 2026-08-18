@@ -17,15 +17,22 @@ pub async fn list_alerts(
     let rules = RuleRepo::new(&db).list_all().await?;
 
     if rules.is_empty() {
-        bot.send_message(msg.chat.id, "No alert rules yet. Use /addalert to create one.")
-            .await?;
+        bot.send_message(
+            msg.chat.id,
+            "No alert rules yet. Use /addalert to create one.",
+        )
+        .await?;
         return Ok(());
     }
 
     let text = rules
         .iter()
         .map(|rule| {
-            let status = if rule.is_enabled() { "enabled" } else { "disabled" };
+            let status = if rule.is_enabled() {
+                "enabled"
+            } else {
+                "disabled"
+            };
             format!(
                 "{}: {} {} {} {} on {} ({status})",
                 rule.id, rule.kind, rule.metric, rule.operator, rule.threshold, rule.target_ref
@@ -51,7 +58,8 @@ pub async fn show_history(
     let events = AlertEventRepo::new(&db).list_recent(10).await?;
 
     if events.is_empty() {
-        bot.send_message(msg.chat.id, "No alerts fired yet.").await?;
+        bot.send_message(msg.chat.id, "No alerts fired yet.")
+            .await?;
         return Ok(());
     }
 
@@ -87,7 +95,8 @@ pub async fn delete_rule(
     let id = match args.trim().parse::<i64>() {
         Ok(id) if id > 0 => id,
         _ => {
-            bot.send_message(msg.chat.id, "Usage: /deleterule <id>").await?;
+            bot.send_message(msg.chat.id, "Usage: /deleterule <id>")
+                .await?;
             return Ok(());
         }
     };
@@ -97,7 +106,8 @@ pub async fn delete_rule(
             bot.send_message(msg.chat.id, "Alert rule deleted.").await?;
         }
         Err(_) => {
-            bot.send_message(msg.chat.id, "Alert rule not found.").await?;
+            bot.send_message(msg.chat.id, "Alert rule not found.")
+                .await?;
         }
     }
 
@@ -118,10 +128,12 @@ pub async fn set_rule_enabled(
     match RuleRepo::new(&db).set_enabled(id, enabled).await {
         Ok(()) => {
             let status = if enabled { "enabled" } else { "disabled" };
-            bot.send_message(msg.chat.id, format!("Alert rule {status}.")).await?;
+            bot.send_message(msg.chat.id, format!("Alert rule {status}."))
+                .await?;
         }
         Err(_) => {
-            bot.send_message(msg.chat.id, "Alert rule not found.").await?;
+            bot.send_message(msg.chat.id, "Alert rule not found.")
+                .await?;
         }
     }
 

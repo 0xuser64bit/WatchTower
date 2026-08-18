@@ -49,7 +49,10 @@ pub async fn authorize_or_send(bot: &Bot, db: &Db, msg: &Message) -> Option<Auth
         Err(err) => {
             tracing::warn!(%err, "authorization failed");
             let _ = bot
-                .send_message(msg.chat.id, "Authorization failed due to an internal error.")
+                .send_message(
+                    msg.chat.id,
+                    "Authorization failed due to an internal error.",
+                )
                 .await;
             None
         }
@@ -97,13 +100,17 @@ mod tests {
 
     #[test]
     fn require_admin_accepts_admin() {
-        let ctx = AuthContext { user: user(Role::Admin) };
+        let ctx = AuthContext {
+            user: user(Role::Admin),
+        };
         assert!(require_admin(&ctx).is_ok());
     }
 
     #[test]
     fn require_admin_rejects_user() {
-        let ctx = AuthContext { user: user(Role::User) };
+        let ctx = AuthContext {
+            user: user(Role::User),
+        };
         assert!(require_admin(&ctx).is_err());
     }
 }

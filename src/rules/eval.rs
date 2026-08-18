@@ -14,8 +14,12 @@ pub fn evaluate(rule: &Rule, sample: &Sample) -> RuleOutcome {
             let pct_change = (sample.value - reference) / reference * 100.0;
 
             match rule.operator() {
-                Operator::PctChangeUp => compare_threshold(Operator::Gte, pct_change, rule.threshold),
-                Operator::PctChangeDown => compare_threshold(Operator::Lte, pct_change, -rule.threshold),
+                Operator::PctChangeUp => {
+                    compare_threshold(Operator::Gte, pct_change, rule.threshold)
+                }
+                Operator::PctChangeDown => {
+                    compare_threshold(Operator::Lte, pct_change, -rule.threshold)
+                }
                 _ => unreachable!(),
             }
         }
@@ -70,35 +74,60 @@ mod tests {
     #[test]
     fn gt_triggers_above_threshold() {
         let rule = base_rule(">", 100.0);
-        let sample = Sample { value: 101.0, reference: None };
-        assert!(matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { current, threshold } if current == 101.0 && threshold == 100.0));
+        let sample = Sample {
+            value: 101.0,
+            reference: None,
+        };
+        assert!(
+            matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { current, threshold } if current == 101.0 && threshold == 100.0)
+        );
     }
 
     #[test]
     fn lt_triggers_below_threshold() {
         let rule = base_rule("<", 100.0);
-        let sample = Sample { value: 99.0, reference: None };
-        assert!(matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { .. }));
+        let sample = Sample {
+            value: 99.0,
+            reference: None,
+        };
+        assert!(matches!(
+            evaluate(&rule, &sample),
+            RuleOutcome::Trigger { .. }
+        ));
     }
 
     #[test]
     fn pct_change_up_uses_reference() {
         let rule = base_rule("pct_change_up", 10.0);
-        let sample = Sample { value: 121.0, reference: Some(110.0) };
-        assert!(matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { current, .. } if current == 10.0));
+        let sample = Sample {
+            value: 121.0,
+            reference: Some(110.0),
+        };
+        assert!(
+            matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { current, .. } if current == 10.0)
+        );
     }
 
     #[test]
     fn pct_change_down_uses_negative_threshold() {
         let rule = base_rule("pct_change_down", 10.0);
-        let sample = Sample { value: 90.0, reference: Some(110.0) };
-        assert!(matches!(evaluate(&rule, &sample), RuleOutcome::Trigger { .. }));
+        let sample = Sample {
+            value: 90.0,
+            reference: Some(110.0),
+        };
+        assert!(matches!(
+            evaluate(&rule, &sample),
+            RuleOutcome::Trigger { .. }
+        ));
     }
 
     #[test]
     fn pct_change_without_reference_does_not_trigger() {
         let rule = base_rule("pct_change_up", 10.0);
-        let sample = Sample { value: 200.0, reference: None };
+        let sample = Sample {
+            value: 200.0,
+            reference: None,
+        };
         assert_eq!(evaluate(&rule, &sample), RuleOutcome::NoTrigger);
     }
 }

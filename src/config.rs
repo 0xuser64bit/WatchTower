@@ -46,9 +46,9 @@ impl Settings {
 
     fn validate(&self) -> Result<()> {
         if self.telegram_bot_token.is_empty() || self.telegram_bot_token == "replace_me" {
-            return Err(AppError::Config(
-                config::ConfigError::Message("TELEGRAM_BOT_TOKEN is not set".into()),
-            ));
+            return Err(AppError::Config(config::ConfigError::Message(
+                "TELEGRAM_BOT_TOKEN is not set".into(),
+            )));
         }
 
         if self.admin_telegram_ids.is_empty() {
@@ -93,10 +93,11 @@ fn parse_ids(raw: &str) -> Result<Vec<i64>> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| {
-            s.parse::<i64>()
-                .map_err(|_| AppError::Config(config::ConfigError::Message(format!(
+            s.parse::<i64>().map_err(|_| {
+                AppError::Config(config::ConfigError::Message(format!(
                     "invalid telegram id: {s}"
-                ))))
+                )))
+            })
         })
         .collect()
 }

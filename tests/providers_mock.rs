@@ -52,7 +52,8 @@ async fn falls_back_when_primary_fails() {
         .create_async()
         .await;
 
-    let provider = CoinGeckoProvider::new(&primary_url, &[fallback_url.clone()]).unwrap();
+    let provider =
+        CoinGeckoProvider::new(&primary_url, std::slice::from_ref(&fallback_url)).unwrap();
     let price = provider.get_native_price_usd().await.unwrap();
 
     fallback_mock.assert_async().await;

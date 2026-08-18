@@ -13,13 +13,23 @@ pub async fn start_add_alert(
     bot: Bot,
     db: Arc<Db>,
     msg: Message,
-    dialogue: Dialogue<crate::telegram::flows::add_alert::AddAlertState, InMemStorage<crate::telegram::flows::add_alert::AddAlertState>>,
+    dialogue: Dialogue<
+        crate::telegram::flows::add_alert::AddAlertState,
+        InMemStorage<crate::telegram::flows::add_alert::AddAlertState>,
+    >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if crate::telegram::auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if crate::telegram::auth::authorize_or_send(&bot, &db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "What kind of alert? Send `price` or `balance`.").await?;
+    bot.send_message(
+        msg.chat.id,
+        "What kind of alert? Send `price` or `balance`.",
+    )
+    .await?;
 
     dialogue
         .update(crate::telegram::flows::add_alert::AddAlertState::AwaitingKind)
@@ -32,6 +42,8 @@ pub async fn fallback(
     bot: Bot,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let _ = bot.send_message(msg.chat.id, "Use /help to see available commands.").await?;
+    let _ = bot
+        .send_message(msg.chat.id, "Use /help to see available commands.")
+        .await?;
     Ok(())
 }

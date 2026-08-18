@@ -14,8 +14,7 @@ impl Db {
     pub async fn connect(database_url: &str) -> Result<Self> {
         create_database_parent(database_url)?;
 
-        let options = SqliteConnectOptions::from_str(database_url)
-            .map_err(sqlx::Error::from)?
+        let options = SqliteConnectOptions::from_str(database_url)?
             .create_if_missing(true)
             .foreign_keys(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
@@ -30,8 +29,7 @@ impl Db {
     }
 
     pub async fn connect_in_memory() -> Result<Self> {
-        let options = SqliteConnectOptions::from_str("sqlite::memory:")
-            .map_err(sqlx::Error::from)?
+        let options = SqliteConnectOptions::from_str("sqlite::memory:")?
             .foreign_keys(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal);
 
