@@ -1,6 +1,7 @@
 mod config;
 mod db;
 mod error;
+mod providers;
 mod telegram;
 
 use crate::db::repos::users::{Role, UserRepo};

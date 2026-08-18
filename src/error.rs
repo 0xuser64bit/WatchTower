@@ -19,6 +19,9 @@ pub enum AppError {
     #[error("telegram error: {0}")]
     Telegram(#[from] teloxide::RequestError),
 
+    #[error("provider error: {0}")]
+    Provider(#[from] crate::providers::ProviderError),
+
     #[error("parse error: {0}")]
     Parse(String),
 
