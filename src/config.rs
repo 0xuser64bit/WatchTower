@@ -129,4 +129,32 @@ mod tests {
         assert!(parse_list("").is_empty());
         assert_eq!(parse_list("a, b, c"), vec!["a", "b", "c"]);
     }
+
+    fn valid_settings() -> Settings {
+        Settings {
+            telegram_bot_token: "token".into(),
+            admin_telegram_ids: vec![123],
+            database_url: "sqlite::memory:".into(),
+            coingecko_api_url: "https://api.coingecko.com/api/v3".into(),
+            price_fallback_urls: vec![],
+            solana_rpc_endpoints: vec!["https://api.mainnet-beta.solana.com".into()],
+            solana_rpc_commitment: "confirmed".into(),
+            poll_interval_seconds: 60,
+            alert_default_cooldown_seconds: 300,
+        }
+    }
+
+    #[test]
+    fn rejects_bad_commitment() {
+        let mut settings = valid_settings();
+        settings.solana_rpc_commitment = "unknown".into();
+        assert!(settings.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_negative_cooldown() {
+        let mut settings = valid_settings();
+        settings.alert_default_cooldown_seconds = -1;
+        assert!(settings.validate().is_err());
+    }
 }

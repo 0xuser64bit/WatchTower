@@ -61,15 +61,27 @@ async fn async_main() {
     let settings = Arc::new(settings);
     let shutdown = CancellationToken::new();
 
-    let price_provider = Arc::new(
-        CoinGeckoProvider::new(&settings.coingecko_api_url, &settings.price_fallback_urls)
-            .expect("failed to build price provider"),
-    );
+    let price_provider = match CoinGeckoProvider::new(
+        &settings.coingecko_api_url,
+        &settings.price_fallback_urls,
+    ) {
+        Ok(provider) => Arc::new(provider),
+        Err(err) => {
+            tracing::error!(%err, "failed to build price provider");
+            std::process::exit(1);
+        }
+    };
 
-    let chain_provider = Arc::new(SolanaRpcProvider::new(
+    let chain_provider = match SolanaRpcProvider::new(
         settings.solana_rpc_endpoints.clone(),
         &settings.solana_rpc_commitment,
-    ));
+    ) {
+        Ok(provider) => Arc::new(provider),
+        Err(err) => {
+            tracing::error!(%err, "failed to build Solana RPC provider");
+            std::process::exit(1);
+        }
+    };
 
     let state = app_state::AppState::new(
         db.clone(),

@@ -78,3 +78,32 @@ pub async fn send_forbidden(bot: &Bot, chat_id: ChatId) {
         .send_message(chat_id, "This action requires admin privileges.")
         .await;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn user(role: Role) -> User {
+        User {
+            id: 1,
+            telegram_id: 123,
+            role: role.as_str().into(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            blocked_at: None,
+        }
+    }
+
+    #[test]
+    fn require_admin_accepts_admin() {
+        let ctx = AuthContext { user: user(Role::Admin) };
+        assert!(require_admin(&ctx).is_ok());
+    }
+
+    #[test]
+    fn require_admin_rejects_user() {
+        let ctx = AuthContext { user: user(Role::User) };
+        assert!(require_admin(&ctx).is_err());
+    }
+}

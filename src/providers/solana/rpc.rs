@@ -42,11 +42,11 @@ struct BalanceResult {
 }
 
 impl SolanaRpcProvider {
-    pub fn new(endpoints: Vec<String>, commitment: &str) -> Self {
+    pub fn new(endpoints: Vec<String>, commitment: &str) -> ProviderResult<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(10))
             .build()
-            .expect("failed to build reqwest client");
+            .map_err(ProviderError::Http)?;
 
         let rpc_endpoints = endpoints
             .into_iter()
@@ -57,12 +57,12 @@ impl SolanaRpcProvider {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             client,
             endpoints: Arc::new(rpc_endpoints),
             next_index: Arc::new(AtomicUsize::new(0)),
             commitment: commitment.to_string(),
-        }
+        })
     }
 
     fn select_endpoint(&self) -> ProviderResult<usize> {

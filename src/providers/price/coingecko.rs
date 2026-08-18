@@ -44,10 +44,7 @@ impl CoinGeckoProvider {
     fn fallback_candidates(&self, mint: &str) -> Vec<String> {
         self.fallback_urls
             .iter()
-            .map(|url| {
-                url.replace("{coin}", "solana")
-                    .replace("{mint}", mint)
-            })
+            .map(|url| url.replace("{coin}", "solana").replace("{mint}", mint))
             .collect()
     }
 
@@ -108,36 +105,34 @@ impl PriceProvider for CoinGeckoProvider {
     async fn get_native_price_usd(&self) -> ProviderResult<f64> {
         let mut last_err = None;
 
-        match self.fetch_native(&self.base_url).await {
-            Ok(price) => return Ok(price),
-            Err(err) => last_err = Some(err),
-        }
-
-        for fallback in self.fallback_candidates("solana") {
-            match self.fetch_native(&fallback).await {
+        for url in std::iter::once(self.base_url.as_str())
+            .chain(self.fallback_candidates("solana").iter().map(String::as_str))
+        {
+            match self.fetch_native(url).await {
                 Ok(price) => return Ok(price),
                 Err(err) => last_err = Some(err),
             }
         }
 
-        Err(last_err.unwrap_or_else(|| ProviderError::Unavailable("no price provider available".into())))
+        Err(last_err.unwrap_or_else(|| {
+            ProviderError::Unavailable("no price provider available".into())
+        }))
     }
 
     async fn get_token_price_usd(&self, mint: &str) -> ProviderResult<f64> {
         let mut last_err = None;
 
-        match self.fetch_token(&self.base_url, mint).await {
-            Ok(price) => return Ok(price),
-            Err(err) => last_err = Some(err),
-        }
-
-        for fallback in self.fallback_candidates(mint) {
-            match self.fetch_token(&fallback, mint).await {
+        for url in std::iter::once(self.base_url.as_str())
+            .chain(self.fallback_candidates(mint).iter().map(String::as_str))
+        {
+            match self.fetch_token(url, mint).await {
                 Ok(price) => return Ok(price),
                 Err(err) => last_err = Some(err),
             }
         }
 
-        Err(last_err.unwrap_or_else(|| ProviderError::Unavailable("no price provider available".into())))
+        Err(last_err.unwrap_or_else(|| {
+            ProviderError::Unavailable("no price provider available".into())
+        }))
     }
 }
