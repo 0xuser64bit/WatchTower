@@ -1,7 +1,4 @@
-use crate::providers::solana::parse::{decode_base64_account, parse_token_account};
-use crate::providers::{
-    ChainProvider, ProviderError, ProviderResult, SignatureInfo, TokenBalance,
-};
+use crate::providers::{ChainProvider, ProviderError, ProviderResult};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::Deserialize;
@@ -11,8 +8,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
 
-const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
-const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
 const HEALTH_RE_ENABLE_AFTER: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
@@ -44,62 +39,6 @@ struct RpcErrorBody {
 #[derive(Debug, Deserialize)]
 struct BalanceResult {
     value: u64,
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenAccountsResult {
-    value: Vec<TokenAccount>,
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenAccount {
-    account: RpcAccount,
-}
-
-#[derive(Debug, Deserialize)]
-struct RpcAccount {
-    data: AccountData,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum AccountData {
-    Encoded { encoded: String },
-    Parsed,
-}
-
-#[derive(Debug, Deserialize)]
-struct MintAccountInfo {
-    data: MintAccountData,
-}
-
-#[derive(Debug, Deserialize)]
-struct MintAccountData {
-    #[serde(default)]
-    parsed: Option<MintParsed>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MintParsed {
-    info: MintInfo,
-}
-
-#[derive(Debug, Deserialize)]
-struct MintInfo {
-    decimals: u8,
-}
-
-#[derive(Debug, Deserialize)]
-struct SignaturesResult {
-    value: Vec<RpcSignature>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RpcSignature {
-    signature: String,
-    slot: u64,
-    #[serde(rename = "blockTime")]
-    block_time: Option<i64>,
 }
 
 impl SolanaRpcProvider {
@@ -136,7 +75,7 @@ impl SolanaRpcProvider {
             let index = self.next_index.fetch_add(1, Ordering::Relaxed) % len;
             let endpoint = &self.endpoints[index];
 
-            if *endpoint.healthy.lock().unwrap() {
+            if *endpoint.healthy.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) {
                 return Ok(index);
             }
 
@@ -149,20 +88,27 @@ impl SolanaRpcProvider {
     fn maybe_re_enable(&self, index: usize) {
         let endpoint = &self.endpoints[index];
 
-        if let Ok(mut healthy) = endpoint.healthy.lock() {
-            if *healthy {
+        let Ok(mut healthy) = endpoint.healthy.lock() else {
+            return;
+        };
+
+        if *healthy {
+            return;
+        }
+
+        let last_failure = *endpoint
+            .last_failure
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        if let Some(last) = last_failure {
+            if last.elapsed() < HEALTH_RE_ENABLE_AFTER {
                 return;
             }
-
-            if let Some(last) = *endpoint.last_failure.lock().unwrap() {
-                if last.elapsed() < HEALTH_RE_ENABLE_AFTER {
-                    return;
-                }
-            }
-
-            *healthy = true;
-            debug!(endpoint = %endpoint.url, "re-enabled RPC endpoint");
         }
+
+        *healthy = true;
+        debug!(endpoint = %endpoint.url, "re-enabled RPC endpoint");
     }
 
     async fn call<T: for<'de> Deserialize<'de>>(
@@ -237,89 +183,5 @@ impl ChainProvider for SolanaRpcProvider {
 
         let result: BalanceResult = self.call("getBalance", params).await?;
         Ok(result.value)
-    }
-
-    async fn get_token_balances(&self, owner: &str) -> ProviderResult<Vec<TokenBalance>> {
-        let mut balances = Vec::new();
-
-        for program_id in [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID] {
-            let params = json!([
-                owner,
-                {
-                    "programId": program_id,
-                    "encoding": "base64",
-                },
-                {
-                    "commitment": self.commitment,
-                }
-            ]);
-
-            let result: TokenAccountsResult = self.call("getTokenAccountsByOwner", params).await?;
-
-            for account in result.value {
-                let data = match &account.account.data {
-                    AccountData::Encoded { encoded } => decode_base64_account(encoded)
-                        .ok_or_else(|| ProviderError::InvalidResponse("invalid base64 account data".into()))?,
-                    AccountData::Parsed => {
-                        return Err(ProviderError::InvalidResponse(
-                            "unexpected parsed account encoding".into(),
-                        ))
-                    }
-                };
-
-                let (mint, amount) = parse_token_account(&data).ok_or_else(|| {
-                    ProviderError::InvalidResponse("invalid token account layout".into())
-                })?;
-
-                balances.push(TokenBalance {
-                    mint,
-                    amount,
-                    decimals: 0,
-                });
-            }
-        }
-
-        Ok(balances)
-    }
-
-    async fn get_recent_signatures(
-        &self,
-        address: &str,
-        limit: u64,
-    ) -> ProviderResult<Vec<SignatureInfo>> {
-        let params = json!([address, {
-            "limit": limit,
-            "commitment": self.commitment,
-        }]);
-
-        let result: SignaturesResult = self.call("getSignaturesForAddress", params).await?;
-
-        Ok(result
-            .value
-            .into_iter()
-            .map(|sig| SignatureInfo {
-                signature: sig.signature,
-                slot: sig.slot,
-                block_time: sig.block_time,
-            })
-            .collect())
-    }
-
-    async fn get_token_decimals(&self, mint: &str) -> ProviderResult<u8> {
-        let params = json!([mint, {
-            "encoding": "jsonParsed",
-            "commitment": self.commitment,
-        }]);
-
-        let result: MintAccountInfo = self.call("getAccountInfo", params).await?;
-
-        let decimals = result
-            .data
-            .parsed
-            .ok_or_else(|| ProviderError::InvalidResponse("missing parsed mint info".into()))?
-            .info
-            .decimals;
-
-        Ok(decimals)
     }
 }

@@ -98,6 +98,17 @@ impl<'a> UserRepo<'a> {
         Ok(users)
     }
 
+    pub async fn list_admins(&self) -> Result<Vec<User>> {
+        let users = sqlx::query_as::<_, User>(
+            "SELECT id, telegram_id, role, created_at, updated_at, blocked_at \
+             FROM users WHERE role = 'admin' AND blocked_at IS NULL ORDER BY created_at ASC",
+        )
+        .fetch_all(self.db.pool())
+        .await?;
+
+        Ok(users)
+    }
+
     pub async fn set_role(&self, telegram_id: i64, role: Role) -> Result<()> {
         let result = sqlx::query(
             "UPDATE users SET role = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \

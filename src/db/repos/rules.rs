@@ -125,6 +125,20 @@ impl<'a> RuleRepo<'a> {
         Ok(())
     }
 
+    pub async fn initialize_reference_if_missing(&self, id: i64, value: f64) -> Result<()> {
+        sqlx::query(
+            "UPDATE rules \
+             SET reference_value = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+             WHERE id = ? AND deleted_at IS NULL AND reference_value IS NULL",
+        )
+        .bind(value)
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+
+        Ok(())
+    }
+
     pub async fn soft_delete(&self, id: i64) -> Result<()> {
         let result = sqlx::query(
             "UPDATE rules SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \

@@ -9,6 +9,8 @@ pub mod rules;
 pub mod telegram;
 
 use db::repos::users::{Role, UserRepo};
+use providers::price::coingecko::CoinGeckoProvider;
+use providers::solana::rpc::SolanaRpcProvider;
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::ChatId;
@@ -59,7 +61,24 @@ async fn async_main() {
     let settings = Arc::new(settings);
     let shutdown = CancellationToken::new();
 
-    let state = app_state::AppState::new(db.clone(), bot.clone(), settings.clone(), shutdown.clone());
+    let price_provider = Arc::new(
+        CoinGeckoProvider::new(&settings.coingecko_api_url, &settings.price_fallback_urls)
+            .expect("failed to build price provider"),
+    );
+
+    let chain_provider = Arc::new(SolanaRpcProvider::new(
+        settings.solana_rpc_endpoints.clone(),
+        &settings.solana_rpc_commitment,
+    ));
+
+    let state = app_state::AppState::new(
+        db.clone(),
+        bot.clone(),
+        settings.clone(),
+        price_provider,
+        chain_provider,
+        shutdown.clone(),
+    );
 
     let admin_chat_id = ChatId(settings.admin_telegram_ids[0]);
 

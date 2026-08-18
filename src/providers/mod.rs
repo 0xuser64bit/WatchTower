@@ -14,12 +14,6 @@ pub enum ProviderError {
 
     #[error("provider unavailable: {0}")]
     Unavailable(String),
-
-    #[error("stale data")]
-    StaleData,
-
-    #[error("rate limited")]
-    RateLimited,
 }
 
 pub type ProviderResult<T> = Result<T, ProviderError>;
@@ -33,21 +27,4 @@ pub trait PriceProvider: Send + Sync {
 #[async_trait]
 pub trait ChainProvider: Send + Sync {
     async fn get_native_balance_lamports(&self, address: &str) -> ProviderResult<u64>;
-    async fn get_token_balances(&self, owner: &str) -> ProviderResult<Vec<TokenBalance>>;
-    async fn get_recent_signatures(&self, address: &str, limit: u64) -> ProviderResult<Vec<SignatureInfo>>;
-    async fn get_token_decimals(&self, mint: &str) -> ProviderResult<u8>;
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct TokenBalance {
-    pub mint: String,
-    pub amount: u64,
-    pub decimals: u8,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct SignatureInfo {
-    pub signature: String,
-    pub slot: u64,
-    pub block_time: Option<i64>,
 }
