@@ -1,4 +1,5 @@
 pub mod price;
+pub mod solana;
 
 use async_trait::async_trait;
 use thiserror::Error;

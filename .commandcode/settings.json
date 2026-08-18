@@ -11,7 +11,9 @@
       "Shell(cargo test 2>&1 | tail -15 && git add -A && git commit -F - <<'EOF' feat: add user repository and auth middleware Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(cargo test 2>&1 | tail -15 && git add -A && git commit -F - <<'EOF' feat: implement telegram bot skeleton with command routing Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(cargo test 2>&1 | tail -20 && git add -A && git commit -F - <<'EOF' feat: add token repository and add-token guided flow Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
-      "Shell(cargo test 2>&1 | tail -15 && git add -A && git commit -F - <<'EOF' feat: implement price provider abstraction with coingecko Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
+      "Shell(cargo test 2>&1 | tail -15 && git add -A && git commit -F - <<'EOF' feat: implement price provider abstraction with coingecko Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(grep:*)",
+      "Shell(git add -A && git commit -F - <<'EOF' feat: implement solana rpc provider with endpoint pool Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
     ],
     "deny": [],
     "defaultMode": "default"
