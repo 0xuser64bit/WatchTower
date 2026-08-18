@@ -20,14 +20,24 @@ pub enum Command {
     Addtoken,
     #[command(description = "list tracked tokens")]
     Tokens,
+    #[command(description = "delete a tracked token")]
+    Deletetoken(String),
     #[command(description = "add a wallet to track")]
     Addwallet,
     #[command(description = "list tracked wallets")]
     Wallets,
+    #[command(description = "delete a tracked wallet")]
+    Deletewallet(String),
     #[command(description = "add an alert rule")]
     Addalert,
     #[command(description = "list alert rules")]
     Alerts,
+    #[command(description = "enable an alert rule")]
+    Enablerule(i64),
+    #[command(description = "disable an alert rule")]
+    Disablerule(i64),
+    #[command(description = "delete an alert rule")]
+    Deleterule(String),
     #[command(description = "show recent alerts")]
     History,
     #[command(description = "open the admin panel")]
@@ -52,10 +62,35 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         .branch(case![Command::Help].endpoint(commands::start::help))
         .branch(case![Command::Addtoken].endpoint(commands::tokens::start_add_token))
         .branch(case![Command::Tokens].endpoint(commands::tokens::list_tokens))
+        .branch(case![Command::Deletetoken(id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
+                commands::tokens::delete_token(bot, db, msg, id).await
+            },
+        ))
         .branch(case![Command::Addwallet].endpoint(commands::wallets::start_add_wallet))
         .branch(case![Command::Wallets].endpoint(commands::wallets::list_wallets))
+        .branch(case![Command::Deletewallet(id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
+                commands::wallets::delete_wallet(bot, db, msg, id).await
+            },
+        ))
         .branch(case![Command::Addalert].endpoint(commands::start_add_alert))
         .branch(case![Command::Alerts].endpoint(commands::alerts::list_alerts))
+        .branch(case![Command::Enablerule(id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, id: i64| async move {
+                commands::alerts::set_rule_enabled(bot, db, msg, id, true).await
+            },
+        ))
+        .branch(case![Command::Disablerule(id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, id: i64| async move {
+                commands::alerts::set_rule_enabled(bot, db, msg, id, false).await
+            },
+        ))
+        .branch(case![Command::Deleterule(id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
+                commands::alerts::delete_rule(bot, db, msg, id).await
+            },
+        ))
         .branch(case![Command::History].endpoint(commands::alerts::show_history))
         .branch(case![Command::Admin].endpoint(commands::admin::admin_menu))
         .branch(case![Command::Listusers].endpoint(commands::admin::list_users))

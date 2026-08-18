@@ -15,16 +15,8 @@ pub async fn start_add_alert(
     msg: Message,
     dialogue: Dialogue<crate::telegram::flows::add_alert::AddAlertState, InMemStorage<crate::telegram::flows::add_alert::AddAlertState>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match crate::telegram::auth::authorize(&db, &msg).await {
-        Ok(_) => {}
-        Err(crate::error::AppError::Unauthorized) => {
-            crate::telegram::auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
+    if crate::telegram::auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
     }
 
     bot.send_message(msg.chat.id, "What kind of alert? Send `price` or `balance`.").await?;

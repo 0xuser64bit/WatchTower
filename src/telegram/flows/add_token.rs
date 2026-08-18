@@ -1,3 +1,4 @@
+use crate::db::repos::tokens::TokenRepo;
 use crate::db::Db;
 use std::sync::Arc;
 use teloxide::dispatching::dialogue::{Dialogue, InMemStorage};
@@ -11,8 +12,8 @@ type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 pub enum AddTokenState {
     #[default]
     AwaitingMint,
-    AwaitingSymbol { mint: String, decimals: i64 },
-    Confirm { mint: String, decimals: i64, symbol: Option<String> },
+    AwaitingSymbol { mint: String },
+    Confirm { mint: String, symbol: Option<String> },
 }
 
 pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
@@ -20,20 +21,17 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
 
     Update::filter_message()
         .branch(case![AddTokenState::AwaitingMint].endpoint(await_mint))
-        .branch(case![AddTokenState::AwaitingSymbol { mint, decimals }].endpoint(await_symbol))
-        .branch(case![AddTokenState::Confirm { mint, decimals, symbol }].endpoint(confirm))
+        .branch(case![AddTokenState::AwaitingSymbol { mint }].endpoint(await_symbol))
+        .branch(case![AddTokenState::Confirm { mint, symbol }].endpoint(confirm))
 }
 
 async fn await_mint(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let text = match msg.text() {
-        Some(text) => text.trim().to_string(),
-        None => {
-            bot.send_message(msg.chat.id, "Please send a valid Solana mint address.").await?;
-            return Ok(());
-        }
+    let Some(text) = msg.text().map(|s| s.trim().to_string()) else {
+        bot.send_message(msg.chat.id, "Please send a valid Solana mint address.").await?;
+        return Ok(());
     };
 
-    if text.len() < 32 || text.len() > 44 {
+    if !crate::providers::solana::validation::is_valid_base58_address(&text) {
         bot.send_message(msg.chat.id, "That does not look like a valid Solana mint address.").await?;
         return Ok(());
     }
@@ -41,7 +39,7 @@ async fn await_mint(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerRe
     bot.send_message(msg.chat.id, "Mint received. Optional symbol? Send `-` to skip.").await?;
 
     dialogue
-        .update(AddTokenState::AwaitingSymbol { mint: text, decimals: 0 })
+        .update(AddTokenState::AwaitingSymbol { mint: text })
         .await?;
     Ok(())
 }
@@ -51,7 +49,6 @@ async fn await_symbol(
     dialogue: FlowDialogue,
     msg: Message,
     mint: String,
-    decimals: i64,
 ) -> HandlerResult {
     let text = msg.text().map(|s| s.trim().to_string());
     let symbol = if text.as_deref() == Some("-") {
@@ -61,17 +58,14 @@ async fn await_symbol(
     };
 
     let symbol_display = symbol.as_deref().unwrap_or("(no symbol)");
-    let keyboard = make_confirm_keyboard();
-
     bot.send_message(
         msg.chat.id,
-        format!("Add token?\nMint: {mint}\nDecimals: {decimals}\nSymbol: {symbol_display}"),
+        format!("Add token?\nMint: {mint}\nSymbol: {symbol_display}\n\nReply `confirm` to create or `cancel` to abort."),
     )
-    .reply_markup(keyboard)
     .await?;
 
     dialogue
-        .update(AddTokenState::Confirm { mint, decimals, symbol })
+        .update(AddTokenState::Confirm { mint, symbol })
         .await?;
     Ok(())
 }
@@ -82,18 +76,15 @@ async fn confirm(
     db: Arc<Db>,
     msg: Message,
     mint: String,
-    decimals: i64,
     symbol: Option<String>,
 ) -> HandlerResult {
-    if msg.text().map(|s| s.to_lowercase()) != Some("confirm".into()) {
+    if msg.text().map(|s| s.trim().to_lowercase()) != Some("confirm".to_string()) {
         bot.send_message(msg.chat.id, "Cancelled.").await?;
         dialogue.exit().await?;
         return Ok(());
     }
 
-    let repo = crate::db::repos::tokens::TokenRepo::new(&db);
-
-    match repo.create(&mint, symbol.as_deref(), None).await {
+    match TokenRepo::new(&db).create(&mint, symbol.as_deref(), None).await {
         Ok(_) => {
             bot.send_message(msg.chat.id, "Token added successfully.").await?;
         }
@@ -104,13 +95,4 @@ async fn confirm(
 
     dialogue.exit().await?;
     Ok(())
-}
-
-fn make_confirm_keyboard() -> teloxide::types::InlineKeyboardMarkup {
-    use teloxide::types::InlineKeyboardButton;
-
-    let confirm = InlineKeyboardButton::callback("Confirm", "addtoken_confirm");
-    let cancel = InlineKeyboardButton::callback("Cancel", "addtoken_cancel");
-
-    teloxide::types::InlineKeyboardMarkup::new(vec![vec![confirm, cancel]])
 }

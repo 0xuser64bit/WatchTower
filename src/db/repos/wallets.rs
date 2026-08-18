@@ -72,4 +72,20 @@ impl<'a> WalletRepo<'a> {
 
         Ok(())
     }
+
+    pub async fn soft_delete(&self, id: i64) -> Result<()> {
+        let result = sqlx::query(
+            "UPDATE wallets SET deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') \
+             WHERE id = ? AND deleted_at IS NULL",
+        )
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!("wallet {id} not found")));
+        }
+
+        Ok(())
+    }
 }

@@ -11,16 +11,8 @@ pub async fn start_add_wallet(
     msg: Message,
     dialogue: Dialogue<crate::telegram::flows::add_wallet::AddWalletState, InMemStorage<crate::telegram::flows::add_wallet::AddWalletState>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match auth::authorize(&db, &msg).await {
-        Ok(_) => {}
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
     }
 
     bot.send_message(msg.chat.id, "Send the Solana wallet address to track.").await?;
@@ -37,16 +29,8 @@ pub async fn list_wallets(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match auth::authorize(&db, &msg).await {
-        Ok(_) => {}
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
     }
 
     let wallets = WalletRepo::new(&db).list().await?;
@@ -72,5 +56,35 @@ pub async fn list_wallets(
 
     bot.send_message(msg.chat.id, format!("Tracked wallets:\n{text}"))
         .await?;
+    Ok(())
+}
+
+pub async fn delete_wallet(
+    bot: Bot,
+    db: Arc<Db>,
+    msg: Message,
+    args: String,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
+    }
+
+    let id = match args.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            bot.send_message(msg.chat.id, "Usage: /deletewallet <id>").await?;
+            return Ok(());
+        }
+    };
+
+    match WalletRepo::new(&db).soft_delete(id).await {
+        Ok(()) => {
+            bot.send_message(msg.chat.id, "Wallet deleted.").await?;
+        }
+        Err(_) => {
+            bot.send_message(msg.chat.id, "Wallet not found.").await?;
+        }
+    }
+
     Ok(())
 }

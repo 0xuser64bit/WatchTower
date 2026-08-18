@@ -26,13 +26,15 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
 }
 
 async fn await_address(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let address = match msg.text().map(|s| s.trim().to_string()) {
-        Some(address) if address.len() >= 32 => address,
-        _ => {
-            bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.").await?;
-            return Ok(());
-        }
+    let Some(address) = msg.text().map(|s| s.trim().to_string()) else {
+        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.").await?;
+        return Ok(());
     };
+
+    if !crate::providers::solana::validation::is_valid_base58_address(&address) {
+        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.").await?;
+        return Ok(());
+    }
 
     bot.send_message(msg.chat.id, "Optional label? Send `-` to skip.").await?;
     dialogue.update(AddWalletState::AwaitingLabel { address }).await?;
@@ -75,14 +77,13 @@ async fn confirm(
 ) -> HandlerResult {
     let reply = msg.text().map(|s| s.trim().to_lowercase());
 
-    if reply != Some("confirm".into()) {
+    if reply != Some("confirm".to_string()) {
         bot.send_message(msg.chat.id, "Cancelled.").await?;
         dialogue.exit().await?;
         return Ok(());
     }
 
-    let repo = WalletRepo::new(&db);
-    match repo.create(&address, label.as_deref()).await {
+    match WalletRepo::new(&db).create(&address, label.as_deref()).await {
         Ok(_) => {
             bot.send_message(msg.chat.id, "Wallet added successfully.").await?;
         }

@@ -9,20 +9,7 @@ pub async fn admin_menu(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -37,20 +24,7 @@ pub async fn list_users(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -59,7 +33,7 @@ pub async fn list_users(
         .iter()
         .map(|user| {
             let blocked = if user.is_blocked() { " (blocked)" } else { "" };
-            format!("{}: {}{blocked}", user.telegram_id, user.role)
+            format!("{}: {}{blocked}", user.telegram_id, user.role())
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -74,26 +48,13 @@ pub async fn add_admin(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) if id > 0 => id,
+        _ => {
             bot.send_message(msg.chat.id, "Usage: /addadmin <telegram_id>").await?;
             return Ok(());
         }
@@ -120,26 +81,13 @@ pub async fn demote_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) if id > 0 => id,
+        _ => {
             bot.send_message(msg.chat.id, "Usage: /demote <telegram_id>").await?;
             return Ok(());
         }
@@ -156,26 +104,13 @@ pub async fn block_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) if id > 0 => id,
+        _ => {
             bot.send_message(msg.chat.id, "Usage: /block <telegram_id>").await?;
             return Ok(());
         }
@@ -192,26 +127,13 @@ pub async fn unblock_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize(&db, &msg).await {
-        Ok(ctx) => ctx,
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
-    };
-
-    if auth::require_admin(&ctx).is_err() {
-        auth::send_forbidden(&bot, msg.chat.id).await;
+    if auth::authorize_admin_or_send(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
     let target_id = match args.trim().parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) if id > 0 => id,
+        _ => {
             bot.send_message(msg.chat.id, "Usage: /unblock <telegram_id>").await?;
             return Ok(());
         }

@@ -10,16 +10,8 @@ pub async fn list_alerts(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match auth::authorize(&db, &msg).await {
-        Ok(_) => {}
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
     }
 
     let rules = RuleRepo::new(&db).list_all().await?;
@@ -35,8 +27,8 @@ pub async fn list_alerts(
         .map(|rule| {
             let status = if rule.is_enabled() { "enabled" } else { "disabled" };
             format!(
-                "{}: {} {} {} {} ({status})",
-                rule.id, rule.kind, rule.metric, rule.operator, rule.threshold
+                "{}: {} {} {} {} on {} ({status})",
+                rule.id, rule.kind, rule.metric, rule.operator, rule.threshold, rule.target_ref
             )
         })
         .collect::<Vec<_>>()
@@ -52,16 +44,8 @@ pub async fn show_history(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match auth::authorize(&db, &msg).await {
-        Ok(_) => {}
-        Err(crate::error::AppError::Unauthorized) => {
-            auth::send_unauthorized(&bot, msg.chat.id).await;
-            return Ok(());
-        }
-        Err(_) => {
-            let _ = bot.send_message(msg.chat.id, "Authorization failed.").await;
-            return Ok(());
-        }
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
     }
 
     let events = AlertEventRepo::new(&db).list_recent(10).await?;
@@ -87,5 +71,59 @@ pub async fn show_history(
 
     bot.send_message(msg.chat.id, format!("Recent alerts:\n{text}"))
         .await?;
+    Ok(())
+}
+
+pub async fn delete_rule(
+    bot: Bot,
+    db: Arc<Db>,
+    msg: Message,
+    args: String,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
+    }
+
+    let id = match args.trim().parse::<i64>() {
+        Ok(id) if id > 0 => id,
+        _ => {
+            bot.send_message(msg.chat.id, "Usage: /deleterule <id>").await?;
+            return Ok(());
+        }
+    };
+
+    match RuleRepo::new(&db).soft_delete(id).await {
+        Ok(()) => {
+            bot.send_message(msg.chat.id, "Alert rule deleted.").await?;
+        }
+        Err(_) => {
+            bot.send_message(msg.chat.id, "Alert rule not found.").await?;
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn set_rule_enabled(
+    bot: Bot,
+    db: Arc<Db>,
+    msg: Message,
+    id: i64,
+    enabled: bool,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+        return Ok(());
+    }
+
+    match RuleRepo::new(&db).set_enabled(id, enabled).await {
+        Ok(()) => {
+            let status = if enabled { "enabled" } else { "disabled" };
+            bot.send_message(msg.chat.id, format!("Alert rule {status}.")).await?;
+        }
+        Err(_) => {
+            bot.send_message(msg.chat.id, "Alert rule not found.").await?;
+        }
+    }
+
     Ok(())
 }

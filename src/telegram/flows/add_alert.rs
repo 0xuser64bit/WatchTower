@@ -30,12 +30,9 @@ pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Syn
 }
 
 async fn await_kind(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let text = match msg.text().map(|s| s.trim().to_lowercase()) {
-        Some(text) => text,
-        None => {
-            bot.send_message(msg.chat.id, "Send the alert kind: `price` or `balance`.").await?;
-            return Ok(());
-        }
+    let Some(text) = msg.text().map(|s| s.trim().to_lowercase()) else {
+        bot.send_message(msg.chat.id, "Send the alert kind: `price` or `balance`.").await?;
+        return Ok(());
     };
 
     if text != "price" && text != "balance" {
@@ -43,7 +40,13 @@ async fn await_kind(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerRe
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Send the token mint address to track.").await?;
+    let prompt = if text == "price" {
+        "Send the token mint address to track."
+    } else {
+        "Send the wallet address to monitor."
+    };
+
+    bot.send_message(msg.chat.id, prompt).await?;
     dialogue.update(AddAlertState::AwaitingTarget { kind: text }).await?;
     Ok(())
 }
@@ -54,13 +57,15 @@ async fn await_target(
     msg: Message,
     kind: String,
 ) -> HandlerResult {
-    let target = match msg.text().map(|s| s.trim().to_string()) {
-        Some(target) if target.len() >= 32 => target,
-        _ => {
-            bot.send_message(msg.chat.id, "Send a valid mint address.").await?;
-            return Ok(());
-        }
+    let Some(target) = msg.text().map(|s| s.trim().to_string()) else {
+        bot.send_message(msg.chat.id, "Send a valid Solana address.").await?;
+        return Ok(());
     };
+
+    if !crate::providers::solana::validation::is_valid_base58_address(&target) {
+        bot.send_message(msg.chat.id, "Send a valid Solana address.").await?;
+        return Ok(());
+    }
 
     bot.send_message(msg.chat.id, "Send the operator: `>`, `<`, `>=`, `<=`, `%up`, or `%down`.").await?;
     dialogue.update(AddAlertState::AwaitingOperator { kind, target }).await?;
@@ -74,12 +79,9 @@ async fn await_operator(
     kind: String,
     target: String,
 ) -> HandlerResult {
-    let operator = match msg.text().map(|s| s.trim().to_lowercase()) {
-        Some(op) => op,
-        None => {
-            bot.send_message(msg.chat.id, "Send a valid operator.").await?;
-            return Ok(());
-        }
+    let Some(operator) = msg.text().map(|s| s.trim().to_lowercase()) else {
+        bot.send_message(msg.chat.id, "Send a valid operator.").await?;
+        return Ok(());
     };
 
     let valid = matches!(operator.as_str(), ">" | "<" | ">=" | "<=" | "%up" | "%down");
@@ -101,13 +103,15 @@ async fn await_threshold(
     target: String,
     operator: String,
 ) -> HandlerResult {
-    let threshold = match msg.text().and_then(|s| s.trim().parse::<f64>().ok()) {
-        Some(value) if value.is_finite() && value > 0.0 => value,
-        _ => {
-            bot.send_message(msg.chat.id, "Send a positive numeric threshold.").await?;
-            return Ok(());
-        }
+    let Some(threshold) = msg.text().and_then(|s| s.trim().parse::<f64>().ok()) else {
+        bot.send_message(msg.chat.id, "Send a positive numeric threshold.").await?;
+        return Ok(());
     };
+
+    if !threshold.is_finite() || threshold <= 0.0 {
+        bot.send_message(msg.chat.id, "Send a positive numeric threshold.").await?;
+        return Ok(());
+    }
 
     bot.send_message(
         msg.chat.id,
@@ -133,19 +137,21 @@ async fn confirm(
 ) -> HandlerResult {
     let reply = msg.text().map(|s| s.trim().to_lowercase());
 
-    if reply != Some("confirm".into()) {
+    if reply != Some("confirm".to_string()) {
         bot.send_message(msg.chat.id, "Cancelled.").await?;
         dialogue.exit().await?;
         return Ok(());
     }
 
-    let repo = RuleRepo::new(&db);
-    let result = repo
+    let target_type = if kind == "price" { "token" } else { "wallet" };
+    let metric = if kind == "price" { "price" } else { "balance" };
+
+    match RuleRepo::new(&db)
         .create(
             &kind,
-            "token",
+            target_type,
             &target,
-            if kind == "price" { "price" } else { "balance" },
+            metric,
             &operator,
             threshold,
             None,
@@ -153,9 +159,8 @@ async fn confirm(
             None,
             None,
         )
-        .await;
-
-    match result {
+        .await
+    {
         Ok(_) => {
             bot.send_message(msg.chat.id, "Alert rule created.").await?;
         }
