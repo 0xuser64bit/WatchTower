@@ -21,7 +21,8 @@
       "Shell(cargo test 2>&1 | tail -16 && git add -A && git commit -F - <<'EOF' feat: wire monitoring engine loop with graceful shutdown Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(cargo test 2>&1 | tail -16 && git add -A && git commit -F - <<'EOF' feat: add admin panel with user management Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
       "Shell(rm:*)",
-      "Shell(git add -A && git commit -F - <<'EOF' test: add integration and provider mock tests Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
+      "Shell(git add -A && git commit -F - <<'EOF' test: add integration and provider mock tests Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)",
+      "Shell(cargo test 2>&1 | tail -12; git add -A && git commit -F - <<'EOF' chore: add systemd unit and deployment documentation Co-authored-by: CommandCodeBot <noreply@commandcode.ai> EOF)"
     ],
     "deny": [],
     "defaultMode": "default"
