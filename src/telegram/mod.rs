@@ -30,6 +30,18 @@ pub enum Command {
     Alerts,
     #[command(description = "show recent alerts")]
     History,
+    #[command(description = "open the admin panel")]
+    Admin,
+    #[command(description = "list authorized users")]
+    Listusers,
+    #[command(description = "grant admin")]
+    Addadmin(String),
+    #[command(description = "revoke admin")]
+    Demote(String),
+    #[command(description = "block user")]
+    Block(String),
+    #[command(description = "unblock user")]
+    Unblock(String),
 }
 
 pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
@@ -44,7 +56,29 @@ pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         .branch(case![Command::Wallets].endpoint(commands::wallets::list_wallets))
         .branch(case![Command::Addalert].endpoint(commands::start_add_alert))
         .branch(case![Command::Alerts].endpoint(commands::alerts::list_alerts))
-        .branch(case![Command::History].endpoint(commands::alerts::show_history));
+        .branch(case![Command::History].endpoint(commands::alerts::show_history))
+        .branch(case![Command::Admin].endpoint(commands::admin::admin_menu))
+        .branch(case![Command::Listusers].endpoint(commands::admin::list_users))
+        .branch(case![Command::Addadmin(telegram_id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
+                commands::admin::add_admin(bot, db, msg, telegram_id).await
+            },
+        ))
+        .branch(case![Command::Demote(telegram_id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
+                commands::admin::demote_user(bot, db, msg, telegram_id).await
+            },
+        ))
+        .branch(case![Command::Block(telegram_id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
+                commands::admin::block_user(bot, db, msg, telegram_id).await
+            },
+        ))
+        .branch(case![Command::Unblock(telegram_id)].endpoint(
+            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
+                commands::admin::unblock_user(bot, db, msg, telegram_id).await
+            },
+        ));
 
     let message_handler = Update::filter_message()
         .branch(command_handler)

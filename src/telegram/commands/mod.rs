@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod alerts;
 pub mod start;
 pub mod tokens;
