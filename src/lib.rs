@@ -1,14 +1,14 @@
-mod alerts;
-mod app_state;
-mod config;
-mod db;
-mod engine;
-mod error;
-mod providers;
-mod rules;
-mod telegram;
+pub mod alerts;
+pub mod app_state;
+pub mod config;
+pub mod db;
+pub mod engine;
+pub mod error;
+pub mod providers;
+pub mod rules;
+pub mod telegram;
 
-use crate::db::repos::users::{Role, UserRepo};
+use db::repos::users::{Role, UserRepo};
 use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::ChatId;
@@ -16,8 +16,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() {
+pub fn main_impl() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+
+    rt.block_on(async_main());
+}
+
+async fn async_main() {
     init_logging();
 
     let settings = match config::Settings::load() {
