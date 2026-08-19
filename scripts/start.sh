@@ -37,17 +37,17 @@ if [[ ! -x "${BIN}" ]]; then
 fi
 
 echo "Starting ChainSentinel..."
-nohup "${BIN}" >>"${LOG_FILE}" 2>&1 &
+nohup "${BIN}" >>"${BOOTSTRAP_LOG}" 2>&1 &
 
 pid=$!
 echo "${pid}" >"${PID_FILE}"
 
 if ! kill -0 "${pid}" 2>/dev/null; then
-    echo "ChainSentinel failed to start. Check ${LOG_FILE}." >&2
+    echo "ChainSentinel failed to start. Check ${BOOTSTRAP_LOG}." >&2
     rm -f "${PID_FILE}"
     exit 1
 fi
 
 echo "ChainSentinel started (PID ${pid})."
-echo "Logs: ${LOG_FILE}"
+echo "Logs: ${LOG_FILE} (symlink to latest daily log)"
 echo "Watch logs: ./scripts/logs.sh -f"

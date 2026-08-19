@@ -10,6 +10,7 @@ DATA_DIR="${PROJECT_ROOT}/data"
 LOG_DIR="${PROJECT_ROOT}/logs"
 PID_FILE="${DATA_DIR}/chainsentinel.pid"
 LOG_FILE="${LOG_DIR}/chainsentinel.log"
+BOOTSTRAP_LOG="${LOG_DIR}/bootstrap.log"
 BIN="${PROJECT_ROOT}/target/release/chainsentinel"
 
 get_pid() {

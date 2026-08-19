@@ -29,13 +29,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ ! -f "${LOG_FILE}" ]]; then
+if [[ ! -e "${LOG_FILE}" && ! -L "${LOG_FILE}" ]]; then
     echo "No log file at ${LOG_FILE}."
     exit 1
 fi
 
 if [[ "${follow}" == "true" ]]; then
-    tail -n "${lines}" -f "${LOG_FILE}"
+    tail -n "${lines}" -F "${LOG_FILE}"
 else
     tail -n "${lines}" "${LOG_FILE}"
 fi

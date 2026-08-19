@@ -12,6 +12,8 @@ pub struct Settings {
     pub solana_rpc_commitment: String,
     pub poll_interval_seconds: u64,
     pub alert_default_cooldown_seconds: i64,
+    pub log_dir: String,
+    pub log_max_files: usize,
 }
 
 impl Settings {
@@ -22,10 +24,12 @@ impl Settings {
             .set_default("COINGECKO_API_URL", "https://api.coingecko.com/api/v3")?
             .set_default("SOLANA_RPC_COMMITMENT", "confirmed")?
             .set_default("POLL_INTERVAL_SECONDS", 60)?
-            .set_default("ALERT_DEFAULT_COOLDOWN_SECONDS", 300)?;
+            .set_default("ALERT_DEFAULT_COOLDOWN_SECONDS", 300)?
+            .set_default("LOG_DIR", "logs")?
+            .set_default("LOG_MAX_FILES", 14)?;
 
         let cfg = builder
-            .add_source(Environment::with_prefix("").separator("__"))
+            .add_source(Environment::default().separator("__"))
             .build()?;
 
         let settings = Settings {
@@ -33,11 +37,15 @@ impl Settings {
             admin_telegram_ids: parse_ids(&cfg.get_string("ADMIN_TELEGRAM_IDS")?)?,
             database_url: cfg.get_string("DATABASE_URL")?,
             coingecko_api_url: cfg.get_string("COINGECKO_API_URL")?,
-            price_fallback_urls: parse_list(&cfg.get_string("PRICE_FALLBACK_URLS")?),
+            price_fallback_urls: parse_list(
+                &cfg.get_string("PRICE_FALLBACK_URLS").unwrap_or_default(),
+            ),
             solana_rpc_endpoints: parse_list(&cfg.get_string("SOLANA_RPC_ENDPOINTS")?),
             solana_rpc_commitment: cfg.get_string("SOLANA_RPC_COMMITMENT")?,
             poll_interval_seconds: cfg.get::<u64>("POLL_INTERVAL_SECONDS")?,
             alert_default_cooldown_seconds: cfg.get::<i64>("ALERT_DEFAULT_COOLDOWN_SECONDS")?,
+            log_dir: cfg.get_string("LOG_DIR")?,
+            log_max_files: cfg.get::<usize>("LOG_MAX_FILES")?,
         };
 
         settings.validate()?;
@@ -81,6 +89,12 @@ impl Settings {
         if self.alert_default_cooldown_seconds < 0 {
             return Err(AppError::Config(config::ConfigError::Message(
                 "ALERT_DEFAULT_COOLDOWN_SECONDS must be zero or greater".into(),
+            )));
+        }
+
+        if self.log_dir.trim().is_empty() {
+            return Err(AppError::Config(config::ConfigError::Message(
+                "LOG_DIR must not be empty".into(),
             )));
         }
 
@@ -142,6 +156,8 @@ mod tests {
             solana_rpc_commitment: "confirmed".into(),
             poll_interval_seconds: 60,
             alert_default_cooldown_seconds: 300,
+            log_dir: "logs".into(),
+            log_max_files: 14,
         }
     }
 

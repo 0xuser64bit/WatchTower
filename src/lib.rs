@@ -16,6 +16,8 @@ use teloxide::prelude::*;
 use teloxide::types::ChatId;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 pub fn main_impl() {
@@ -28,15 +30,15 @@ pub fn main_impl() {
 }
 
 async fn async_main() {
-    init_logging();
-
     let settings = match config::Settings::load() {
         Ok(settings) => settings,
         Err(err) => {
-            tracing::error!(%err, "failed to load configuration");
+            eprintln!("failed to load configuration: {err}");
             std::process::exit(1);
         }
     };
+
+    init_logging(&settings.log_dir, settings.log_max_files);
 
     let db = match db::Db::connect(&settings.database_url).await {
         Ok(db) => db,
@@ -169,11 +171,32 @@ async fn wait_for_shutdown_signal() {
     }
 }
 
-fn init_logging() {
+fn init_logging(log_dir: &str, log_max_files: usize) {
+    std::fs::create_dir_all(log_dir).expect("failed to create log directory");
+
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let file_appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix("chainsentinel")
+        .filename_suffix("log")
+        .max_log_files(log_max_files)
+        .latest_symlink("chainsentinel.log")
+        .build(log_dir)
+        .expect("failed to build rolling log appender");
+
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    let file_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
+        .with_writer(non_blocking);
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(file_layer)
         .init();
+
+    // Keep the worker alive for the lifetime of the process. Leaking the guard is the
+    // documented way to ensure buffered logs are flushed during abrupt termination.
+    std::mem::forget(_guard);
 }

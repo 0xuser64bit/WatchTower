@@ -160,6 +160,8 @@ mod tests {
             solana_rpc_commitment: "confirmed".into(),
             poll_interval_seconds: 60,
             alert_default_cooldown_seconds: 300,
+            log_dir: "logs".into(),
+            log_max_files: 14,
         })
     }
 
