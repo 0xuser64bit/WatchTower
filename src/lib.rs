@@ -189,6 +189,7 @@ fn init_logging(log_dir: &str, log_max_files: usize) {
 
     let file_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
+        .with_ansi(false)
         .with_writer(non_blocking);
 
     tracing_subscriber::registry()
