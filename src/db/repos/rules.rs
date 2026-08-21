@@ -134,6 +134,10 @@ impl<'a> RuleRepo<'a> {
             Err(err) if is_unique_violation(&err) => Err(AppError::Conflict(
                 "an identical alert rule already exists for this target".into(),
             )),
+            // The target was deleted between being chosen and the rule being saved.
+            Err(err) if is_foreign_key_violation(&err) => Err(AppError::Conflict(
+                "that target is no longer tracked".into(),
+            )),
             Err(err) => Err(err.into()),
         }
     }
@@ -219,4 +223,9 @@ impl<'a> RuleRepo<'a> {
 pub(crate) fn is_unique_violation(err: &sqlx::Error) -> bool {
     matches!(err, sqlx::Error::Database(db) if db.code().as_deref() == Some("2067")
         || db.message().contains("UNIQUE constraint failed"))
+}
+
+fn is_foreign_key_violation(err: &sqlx::Error) -> bool {
+    matches!(err, sqlx::Error::Database(db) if db.code().as_deref() == Some("787")
+        || db.message().contains("FOREIGN KEY constraint failed"))
 }

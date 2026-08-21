@@ -12,47 +12,69 @@ use crate::telegram::auth::{self, Authorization};
 use teloxide::prelude::*;
 use teloxide::types::ChatId;
 
-/// Telegram rejects `sendMessage` payloads longer than this.
+/// Telegram rejects `sendMessage` payloads longer than this, counted in UTF-16 code
+/// units rather than characters or bytes.
 pub const MAX_MESSAGE_LEN: usize = 4096;
 
-/// Split at a slightly lower bound so a chunk plus a continuation marker still fits.
+/// Split at a slightly lower bound so a chunk plus any framing still fits.
 const CHUNK_LEN: usize = 3900;
 
-/// Splits `text` into pieces that Telegram will accept, preferring line breaks and
-/// never splitting inside a UTF-8 character.
-pub fn chunk_message(text: &str, limit: usize) -> Vec<String> {
-    assert!(limit > 0, "chunk limit must be positive");
+/// Length of `text` in the units Telegram actually counts.
+///
+/// Counting characters would under-count: every emoji and every character outside the
+/// basic multilingual plane is two UTF-16 units, so a message of emoji that looks
+/// half the limit long is rejected outright — and a rejected send means a missed
+/// reply, or a missed alert.
+fn width(text: &str) -> usize {
+    text.encode_utf16().count()
+}
 
-    if text.chars().count() <= limit {
+/// Splits `text` into pieces Telegram will accept, preferring line breaks and never
+/// splitting inside a character.
+pub fn chunk_message(text: &str, limit: usize) -> Vec<String> {
+    // Clamped rather than asserted: a bad limit must not be able to panic a
+    // long-running daemon.
+    let limit = limit.max(1);
+
+    if width(text) <= limit {
         return vec![text.to_string()];
     }
 
     let mut chunks = Vec::new();
     let mut current = String::new();
+    let mut current_width = 0;
+
+    let mut flush = |current: &mut String, current_width: &mut usize| {
+        if !current.is_empty() {
+            chunks.push(std::mem::take(current));
+            *current_width = 0;
+        }
+    };
 
     for line in text.split_inclusive('\n') {
-        // A single line longer than the limit has to be split mid-line.
-        if line.chars().count() > limit {
-            if !current.is_empty() {
-                chunks.push(std::mem::take(&mut current));
-            }
+        let line_width = width(line);
 
-            let mut piece = String::new();
+        // A single line longer than the limit has to be split mid-line.
+        if line_width > limit {
+            flush(&mut current, &mut current_width);
+
             for ch in line.chars() {
-                if piece.chars().count() == limit {
-                    chunks.push(std::mem::take(&mut piece));
+                let ch_width = ch.len_utf16();
+                if current_width + ch_width > limit {
+                    flush(&mut current, &mut current_width);
                 }
-                piece.push(ch);
+                current.push(ch);
+                current_width += ch_width;
             }
-            current = piece;
             continue;
         }
 
-        if current.chars().count() + line.chars().count() > limit {
-            chunks.push(std::mem::take(&mut current));
+        if current_width + line_width > limit {
+            flush(&mut current, &mut current_width);
         }
 
         current.push_str(line);
+        current_width += line_width;
     }
 
     if !current.is_empty() {
@@ -196,17 +218,40 @@ mod tests {
         // Multi-byte characters: a naive byte split would produce invalid UTF-8.
         let text = "é".repeat(25);
         let chunks = chunk_message(&text, 10);
-        assert!(chunks.iter().all(|c| c.chars().count() <= 10));
+        assert!(chunks.iter().all(|c| width(c) <= 10));
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn measures_surrogate_pairs_the_way_telegram_does() {
+        // Each of these is one `char` but two UTF-16 units. Counting characters would
+        // build chunks twice as long as Telegram accepts, and the send would fail.
+        let text = "\u{1f6a8}".repeat(20);
+        assert_eq!(text.chars().count(), 20);
+        assert_eq!(width(&text), 40);
+
+        let chunks = chunk_message(&text, 10);
+        assert!(chunks.iter().all(|c| width(c) <= 10), "{chunks:?}");
+        assert_eq!(chunks.len(), 4);
         assert_eq!(chunks.concat(), text);
     }
 
     #[test]
     fn every_chunk_fits_the_telegram_limit() {
         let text = (0..500)
-            .map(|i| format!("rule {i} is enabled\n"))
+            .map(|i| format!("rule {i} \u{26a0}\u{fe0f} is enabled\n"))
             .collect::<String>();
-        for chunk in chunk_message(&text, CHUNK_LEN) {
-            assert!(chunk.chars().count() <= MAX_MESSAGE_LEN);
+
+        let chunks = chunk_message(&text, CHUNK_LEN);
+        assert!(chunks.len() > 1);
+        for chunk in &chunks {
+            assert!(width(chunk) <= MAX_MESSAGE_LEN, "{}", width(chunk));
         }
+        assert_eq!(chunks.concat(), text);
+    }
+
+    #[test]
+    fn a_zero_limit_does_not_panic() {
+        assert_eq!(chunk_message("ab", 0).concat(), "ab");
     }
 }

@@ -323,3 +323,22 @@ async fn user_facing_errors_never_leak_internals() {
         .user_message()
         .contains("token 7"));
 }
+
+#[tokio::test]
+async fn a_target_deleted_mid_flow_yields_a_clear_conflict() {
+    let db = db().await;
+    let token = TokenRepo::new(&db).create(MINT, None).await.unwrap();
+
+    // The guided flow resolves the target, then asks two more questions before saving.
+    // If the target disappears in between, the raw foreign-key error would surface as
+    // "something went wrong on our side", which is both wrong and unactionable.
+    TokenRepo::new(&db).delete(token.id).await.unwrap();
+
+    let err = RuleRepo::new(&db)
+        .create(NewRuleTarget::Token { id: token.id }, Operator::Gt, 1.0, 0)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(err, AppError::Conflict(_)), "{err}");
+    assert!(err.user_message().contains("no longer tracked"), "{err}");
+}

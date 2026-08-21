@@ -74,34 +74,34 @@ pub fn evaluate(rule: &Rule, observed: f64, now: DateTime<Utc>) -> Decision {
         };
     }
 
-    let condition_met = if rule.operator.is_percentage() {
-        let Some(baseline) = rule.reference_value else {
-            return Decision::BaselineSet {
-                reference: observed,
+    // Matched exhaustively in one place so there is no unreachable arm to panic on,
+    // and so adding an operator is a compile error rather than a silent fallthrough.
+    let condition_met = match rule.operator {
+        Operator::Gt => observed > rule.threshold,
+        Operator::Lt => observed < rule.threshold,
+        Operator::Gte => observed >= rule.threshold,
+        Operator::Lte => observed <= rule.threshold,
+        Operator::PctUp | Operator::PctDown => {
+            let Some(baseline) = rule.reference_value else {
+                return Decision::BaselineSet {
+                    reference: observed,
+                };
             };
-        };
 
-        // A zero or non-finite baseline makes percentage change undefined.
-        if baseline == 0.0 || !baseline.is_finite() {
-            return Decision::Skip {
-                reason: "baseline is not usable for percentage change",
-            };
-        }
+            // A zero or non-finite baseline makes percentage change undefined.
+            if baseline == 0.0 || !baseline.is_finite() {
+                return Decision::Skip {
+                    reason: "baseline is not usable for percentage change",
+                };
+            }
 
-        let change_pct = (observed - baseline) / baseline.abs() * 100.0;
+            let change_pct = (observed - baseline) / baseline.abs() * 100.0;
 
-        match rule.operator {
-            Operator::PctUp => change_pct >= rule.threshold,
-            Operator::PctDown => change_pct <= -rule.threshold,
-            _ => unreachable!("is_percentage() restricts this to the pct operators"),
-        }
-    } else {
-        match rule.operator {
-            Operator::Gt => observed > rule.threshold,
-            Operator::Lt => observed < rule.threshold,
-            Operator::Gte => observed >= rule.threshold,
-            Operator::Lte => observed <= rule.threshold,
-            _ => unreachable!("percentage operators handled above"),
+            if rule.operator == Operator::PctUp {
+                change_pct >= rule.threshold
+            } else {
+                change_pct <= -rule.threshold
+            }
         }
     };
 
