@@ -1,9 +1,11 @@
 /target
 /.env
 /data/
+/logs/
 *.db
 *.db-wal
 *.db-shm
 .idea/
 .vscode/
 .DS_Store
+.commandcode/
