@@ -4,7 +4,7 @@ use crate::app_state::AppState;
 use crate::config::Settings;
 use crate::db::repos::users::{Role, UserRepo};
 use crate::db::Db;
-use crate::error::Result;
+use crate::error::{AppError, Result};
 use crate::providers::price::CoinGeckoProvider;
 use crate::providers::solana::SolanaRpcProvider;
 use crate::{engine, observability, telegram};
@@ -16,8 +16,16 @@ use tracing::{error, info, warn};
 /// How long in-flight work gets to finish after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(20);
 
-/// Process exit code used for any startup failure.
-const EXIT_STARTUP_FAILURE: i32 = 1;
+/// Why the process is stopping. Determines the exit code, so a supervisor and an
+/// operator can tell a requested shutdown from a component failure. Previously any
+/// outcome, including the control plane dying at startup, exited zero.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stop {
+    /// SIGTERM or SIGINT.
+    Signal,
+    /// The control plane or the monitoring engine ended on its own.
+    TaskFailed,
+}
 
 pub fn main() -> std::process::ExitCode {
     // Configuration is read before logging is initialised, so failures here have to
@@ -27,7 +35,7 @@ pub fn main() -> std::process::ExitCode {
         Err(err) => {
             eprintln!("chainsentinel: configuration error: {err}");
             eprintln!("chainsentinel: see .env.example for the expected variables");
-            return std::process::ExitCode::from(EXIT_STARTUP_FAILURE as u8);
+            return std::process::ExitCode::FAILURE;
         }
     };
 
@@ -40,20 +48,21 @@ pub fn main() -> std::process::ExitCode {
         Ok(runtime) => runtime,
         Err(err) => {
             error!(%err, "failed to build the tokio runtime");
-            return std::process::ExitCode::from(EXIT_STARTUP_FAILURE as u8);
+            return std::process::ExitCode::FAILURE;
         }
     };
 
     match runtime.block_on(run(settings)) {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+        Ok(Stop::Signal) => std::process::ExitCode::SUCCESS,
+        Ok(Stop::TaskFailed) => std::process::ExitCode::FAILURE,
         Err(err) => {
-            error!(%err, "chainsentinel exited with an error");
-            std::process::ExitCode::from(EXIT_STARTUP_FAILURE as u8)
+            error!(%err, "chainsentinel failed to start");
+            std::process::ExitCode::FAILURE
         }
     }
 }
 
-async fn run(settings: Settings) -> Result<()> {
+async fn run(settings: Settings) -> Result<Stop> {
     info!(
         version = env!("CARGO_PKG_VERSION"),
         poll_interval_secs = settings.poll_interval.as_secs(),
@@ -82,8 +91,14 @@ async fn run(settings: Settings) -> Result<()> {
         settings.http_timeout,
     )?);
 
-    let shutdown = CancellationToken::new();
     let bot = teloxide::Bot::new(settings.telegram_bot_token.expose());
+
+    // Verify the credential before starting anything else. teloxide's dispatcher
+    // calls `getMe` internally and `expect`s the result, so a bad token otherwise
+    // surfaces as a panic from inside a dependency with no actionable context.
+    verify_bot_token(&bot).await?;
+
+    let shutdown = CancellationToken::new();
 
     let state = AppState::new(
         Arc::new(db.clone()),
@@ -94,47 +109,71 @@ async fn run(settings: Settings) -> Result<()> {
         shutdown.clone(),
     );
 
+    let mut tasks = tokio::task::JoinSet::new();
+
     let telegram_state = state.clone();
-    let telegram_task = tokio::spawn(async move { telegram::run(telegram_state).await });
+    tasks.spawn(async move { telegram::run(telegram_state).await });
 
     let engine_state = state.clone();
-    let engine_task = tokio::spawn(async move { engine::scheduler::run(engine_state).await });
+    tasks.spawn(async move { engine::scheduler::run(engine_state).await });
 
-    // If either half dies unexpectedly the process must not linger half-alive: a
-    // running engine with a dead control plane cannot be managed or even inspected.
-    tokio::select! {
-        _ = wait_for_shutdown_signal() => info!("shutdown signal received"),
-        result = &mut Box::pin(flatten(telegram_task)) => {
-            warn!(?result, "telegram dispatcher stopped unexpectedly");
+    // Either half dying leaves the daemon unusable: a running engine with a dead
+    // control plane cannot be managed or even inspected. Stop, and exit non-zero so a
+    // supervisor restart is visible rather than looking like a clean shutdown.
+    let stop = tokio::select! {
+        _ = wait_for_shutdown_signal() => Stop::Signal,
+        Some(result) = tasks.join_next() => {
+            match result {
+                Ok(()) => error!("a core task stopped unexpectedly"),
+                Err(err) => error!(%err, "a core task terminated abnormally"),
+            }
+            Stop::TaskFailed
         }
-        result = &mut Box::pin(flatten(engine_task)) => {
-            warn!(?result, "monitoring engine stopped unexpectedly");
-        }
-    }
+    };
 
     shutdown.cancel();
-
-    // Bounded drain: an unresponsive Telegram long-poll must not hang the shutdown.
-    if tokio::time::timeout(SHUTDOWN_GRACE, state.shutdown.cancelled())
-        .await
-        .is_err()
-    {
-        warn!("shutdown grace period elapsed");
-    }
-
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    drain(&mut tasks).await;
 
     if let Err(err) = db.checkpoint().await {
         warn!(%err, "failed to checkpoint the write-ahead log");
     }
     db.close().await;
 
-    info!("ChainSentinel stopped");
-    Ok(())
+    info!(?stop, "ChainSentinel stopped");
+    Ok(stop)
 }
 
-async fn flatten(handle: tokio::task::JoinHandle<()>) -> std::result::Result<(), String> {
-    handle.await.map_err(|err| err.to_string())
+/// Waits for the remaining tasks, then forces them down if they overrun.
+async fn drain(tasks: &mut tokio::task::JoinSet<()>) {
+    let wait = async { while tasks.join_next().await.is_some() {} };
+
+    if tokio::time::timeout(SHUTDOWN_GRACE, wait).await.is_err() {
+        // A Telegram long-poll can sit on an open connection for its full timeout.
+        warn!(
+            grace_secs = SHUTDOWN_GRACE.as_secs(),
+            "shutdown grace period elapsed; aborting remaining tasks"
+        );
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
+    }
+}
+
+async fn verify_bot_token(bot: &teloxide::Bot) -> Result<()> {
+    use teloxide::prelude::Requester;
+
+    match bot.get_me().await {
+        Ok(me) => {
+            info!(
+                bot_username = me.user.username.as_deref().unwrap_or("unknown"),
+                bot_id = me.user.id.0,
+                "authenticated with Telegram"
+            );
+            Ok(())
+        }
+        Err(err) => Err(AppError::InvalidInput(format!(
+            "Telegram rejected the bot token ({err}). Check TELEGRAM_BOT_TOKEN against @BotFather"
+        ))),
+    }
 }
 
 /// Ensures the configured bootstrap admins exist.
