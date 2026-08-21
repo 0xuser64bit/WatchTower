@@ -18,7 +18,7 @@ pub async fn start_add_alert(
         InMemStorage<crate::telegram::flows::add_alert::AddAlertState>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if crate::telegram::auth::authorize_or_send(&bot, &db, &msg)
+    if crate::telegram::reply::require_user(&bot, &db, &msg)
         .await
         .is_none()
     {

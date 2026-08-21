@@ -1,116 +1,126 @@
-use crate::db::repos::users::{Role, User, UserRepo};
+//! Authorization for the Telegram control plane.
+//!
+//! Identity is the numeric Telegram user id and nothing else: usernames are
+//! mutable and are never trusted. The `users` table is the single authority for
+//! who may act; the bootstrap ids in configuration only seed it.
+
+use crate::db::repos::users::{AuthUser, Role, UserRepo};
 use crate::db::Db;
-use crate::error::{AppError, Result};
-use teloxide::prelude::*;
-use teloxide::types::ChatId;
+use crate::error::Result;
+use teloxide::types::Message;
 
-#[derive(Clone)]
-pub struct AuthContext {
-    pub user: User,
+/// Outcome of an authorization check. Modelled as a value, not an error, because
+/// "this user may not do that" is an expected control-plane result that always has
+/// a specific user-facing reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Authorization {
+    Allowed(AuthUser),
+    Denied(DenyReason),
 }
 
-pub async fn authorize(db: &Db, message: &Message) -> Result<AuthContext> {
-    let telegram_id = message
-        .from()
-        .map(|user| user.id.0 as i64)
-        .ok_or_else(|| AppError::Unauthorized)?;
-
-    let user = UserRepo::new(db)
-        .find_by_telegram_id(telegram_id)
-        .await?
-        .ok_or(AppError::Unauthorized)?;
-
-    if user.is_blocked() {
-        return Err(AppError::Forbidden);
-    }
-
-    Ok(AuthContext { user })
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DenyReason {
+    /// Not present in the users table.
+    NotRegistered,
+    /// Present but blocked by an admin.
+    Blocked,
+    /// Present and active, but lacks the admin role.
+    NotAdmin,
+    /// The update carried no sender (e.g. an anonymous channel post).
+    NoSender,
 }
 
-pub fn require_admin(ctx: &AuthContext) -> Result<()> {
-    if ctx.user.role() != Role::Admin {
-        return Err(AppError::Forbidden);
-    }
-
-    Ok(())
-}
-
-pub async fn authorize_or_send(bot: &Bot, db: &Db, msg: &Message) -> Option<AuthContext> {
-    match authorize(db, msg).await {
-        Ok(ctx) => Some(ctx),
-        Err(AppError::Unauthorized) => {
-            send_unauthorized(bot, msg.chat.id).await;
-            None
-        }
-        Err(AppError::Forbidden) => {
-            send_forbidden(bot, msg.chat.id).await;
-            None
-        }
-        Err(err) => {
-            tracing::warn!(%err, "authorization failed");
-            let _ = bot
-                .send_message(
-                    msg.chat.id,
-                    "Authorization failed due to an internal error.",
-                )
-                .await;
-            None
+impl DenyReason {
+    pub fn user_message(self) -> &'static str {
+        match self {
+            // Deliberately identical for unregistered and blocked users: revealing
+            // which one applies tells an unknown caller whether an id is known.
+            DenyReason::NotRegistered | DenyReason::Blocked | DenyReason::NoSender => {
+                "You are not authorized to use this bot."
+            }
+            DenyReason::NotAdmin => "This action requires admin privileges.",
         }
     }
 }
 
-pub async fn authorize_admin_or_send(bot: &Bot, db: &Db, msg: &Message) -> Option<AuthContext> {
-    let ctx = authorize_or_send(bot, db, msg).await?;
-
-    if require_admin(&ctx).is_err() {
-        send_forbidden(bot, msg.chat.id).await;
-        return None;
+impl Authorization {
+    pub fn allowed(&self) -> Option<&AuthUser> {
+        match self {
+            Authorization::Allowed(user) => Some(user),
+            Authorization::Denied(_) => None,
+        }
     }
 
-    Some(ctx)
+    /// Narrows an existing decision to admins only.
+    pub fn require_admin(self) -> Self {
+        match self {
+            Authorization::Allowed(user) if user.role != Role::Admin => {
+                Authorization::Denied(DenyReason::NotAdmin)
+            }
+            other => other,
+        }
+    }
 }
 
-pub async fn send_unauthorized(bot: &Bot, chat_id: ChatId) {
-    let _ = bot
-        .send_message(chat_id, "You are not authorized to use this bot.")
-        .await;
-}
+/// Resolves the sender of `message` against the users table.
+pub async fn authorize(db: &Db, message: &Message) -> Result<Authorization> {
+    let Some(sender) = message.from() else {
+        return Ok(Authorization::Denied(DenyReason::NoSender));
+    };
 
-pub async fn send_forbidden(bot: &Bot, chat_id: ChatId) {
-    let _ = bot
-        .send_message(chat_id, "This action requires admin privileges.")
-        .await;
+    let telegram_id = sender.id.0 as i64;
+
+    let Some(user) = UserRepo::new(db).find_by_telegram_id(telegram_id).await? else {
+        tracing::info!(telegram_id, "rejected update from unregistered user");
+        return Ok(Authorization::Denied(DenyReason::NotRegistered));
+    };
+
+    if user.blocked {
+        tracing::info!(telegram_id, "rejected update from blocked user");
+        return Ok(Authorization::Denied(DenyReason::Blocked));
+    }
+
+    Ok(Authorization::Allowed(AuthUser {
+        telegram_id: user.telegram_id,
+        role: user.role,
+    }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
 
-    fn user(role: Role) -> User {
-        User {
-            id: 1,
-            telegram_id: 123,
-            role: role.as_str().into(),
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            blocked_at: None,
-        }
+    fn user(role: Role) -> Authorization {
+        Authorization::Allowed(AuthUser {
+            telegram_id: 1,
+            role,
+        })
     }
 
     #[test]
-    fn require_admin_accepts_admin() {
-        let ctx = AuthContext {
-            user: user(Role::Admin),
-        };
-        assert!(require_admin(&ctx).is_ok());
+    fn require_admin_keeps_admins() {
+        assert_eq!(user(Role::Admin).require_admin(), user(Role::Admin));
     }
 
     #[test]
-    fn require_admin_rejects_user() {
-        let ctx = AuthContext {
-            user: user(Role::User),
-        };
-        assert!(require_admin(&ctx).is_err());
+    fn require_admin_denies_plain_users() {
+        assert_eq!(
+            user(Role::User).require_admin(),
+            Authorization::Denied(DenyReason::NotAdmin)
+        );
+    }
+
+    #[test]
+    fn require_admin_preserves_earlier_denial() {
+        let denied = Authorization::Denied(DenyReason::Blocked);
+        assert_eq!(denied.clone().require_admin(), denied);
+    }
+
+    #[test]
+    fn unknown_and_blocked_are_indistinguishable_to_the_caller() {
+        assert_eq!(
+            DenyReason::NotRegistered.user_message(),
+            DenyReason::Blocked.user_message()
+        );
     }
 }

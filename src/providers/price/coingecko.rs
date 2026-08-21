@@ -7,8 +7,7 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct CoinGeckoProvider {
     client: Client,
-    base_url: String,
-    fallback_urls: Vec<String>,
+    base_urls: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -28,24 +27,27 @@ struct TokenPriceResponse {
 }
 
 impl CoinGeckoProvider {
-    pub fn new(base_url: &str, fallback_urls: &[String]) -> ProviderResult<Self> {
+    /// `base_urls` is an ordered list of CoinGecko-compatible API roots; the first is
+    /// primary and the remainder are tried in order when it fails.
+    pub fn new(base_urls: &[String], timeout: Duration) -> ProviderResult<Self> {
+        if base_urls.is_empty() {
+            return Err(ProviderError::Unavailable(
+                "no price API URLs configured".into(),
+            ));
+        }
+
         let client = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(timeout)
             .build()
             .map_err(ProviderError::Http)?;
 
         Ok(Self {
             client,
-            base_url: base_url.trim_end_matches('/').to_string(),
-            fallback_urls: fallback_urls.to_vec(),
+            base_urls: base_urls
+                .iter()
+                .map(|url| url.trim_end_matches('/').to_string())
+                .collect(),
         })
-    }
-
-    fn fallback_candidates(&self, mint: &str) -> Vec<String> {
-        self.fallback_urls
-            .iter()
-            .map(|url| url.replace("{coin}", "solana").replace("{mint}", mint))
-            .collect()
     }
 
     async fn fetch_native(&self, url: &str) -> ProviderResult<f64> {
@@ -105,11 +107,7 @@ impl PriceProvider for CoinGeckoProvider {
     async fn get_native_price_usd(&self) -> ProviderResult<f64> {
         let mut last_err = None;
 
-        for url in std::iter::once(self.base_url.as_str()).chain(
-            self.fallback_candidates("solana")
-                .iter()
-                .map(String::as_str),
-        ) {
+        for url in &self.base_urls {
             match self.fetch_native(url).await {
                 Ok(price) => return Ok(price),
                 Err(err) => last_err = Some(err),
@@ -123,9 +121,7 @@ impl PriceProvider for CoinGeckoProvider {
     async fn get_token_price_usd(&self, mint: &str) -> ProviderResult<f64> {
         let mut last_err = None;
 
-        for url in std::iter::once(self.base_url.as_str())
-            .chain(self.fallback_candidates(mint).iter().map(String::as_str))
-        {
+        for url in &self.base_urls {
             match self.fetch_token(url, mint).await {
                 Ok(price) => return Ok(price),
                 Err(err) => last_err = Some(err),

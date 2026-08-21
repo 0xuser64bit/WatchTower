@@ -1,5 +1,6 @@
+use crate::db::repos::users::Role;
 use crate::db::Db;
-use crate::telegram::auth;
+use crate::telegram::reply;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
@@ -32,16 +33,16 @@ pub async fn start(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize_or_send(&bot, &db, &msg).await {
-        Some(ctx) => ctx,
-        None => return Ok(()),
+    let Some(user) = reply::require_user(&bot, &db, &msg).await else {
+        return Ok(());
     };
 
-    bot.send_message(
+    reply::send_text(
+        &bot,
         msg.chat.id,
         format!(
             "Welcome to ChainSentinel, Telegram ID {}.\n\n{COMMAND_HELP}",
-            ctx.user.telegram_id
+            user.telegram_id
         ),
     )
     .await?;
@@ -54,17 +55,16 @@ pub async fn help(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let ctx = match auth::authorize_or_send(&bot, &db, &msg).await {
-        Some(ctx) => ctx,
-        None => return Ok(()),
+    let Some(user) = reply::require_user(&bot, &db, &msg).await else {
+        return Ok(());
     };
 
     let mut text = COMMAND_HELP.to_string();
 
-    if ctx.user.role() == crate::db::repos::users::Role::Admin {
+    if user.role == Role::Admin {
         text.push_str(ADMIN_COMMAND_HELP);
     }
 
-    bot.send_message(msg.chat.id, text).await?;
+    reply::send_text(&bot, msg.chat.id, text).await?;
     Ok(())
 }

@@ -1,6 +1,6 @@
 use crate::db::repos::wallets::WalletRepo;
 use crate::db::Db;
-use crate::telegram::auth;
+use crate::telegram::reply;
 use std::sync::Arc;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
@@ -14,7 +14,7 @@ pub async fn start_add_wallet(
         InMemStorage<crate::telegram::flows::add_wallet::AddWalletState>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -33,7 +33,7 @@ pub async fn list_wallets(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -61,8 +61,7 @@ pub async fn list_wallets(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Tracked wallets:\n{text}"))
-        .await?;
+    reply::send_text(&bot, msg.chat.id, format!("Tracked wallets:\n{text}")).await?;
     Ok(())
 }
 
@@ -72,7 +71,7 @@ pub async fn delete_wallet(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 

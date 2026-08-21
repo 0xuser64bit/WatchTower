@@ -1,6 +1,6 @@
 use crate::db::repos::tokens::TokenRepo;
 use crate::db::Db;
-use crate::telegram::auth;
+use crate::telegram::reply;
 use std::sync::Arc;
 use teloxide::dispatching::dialogue::InMemStorage;
 use teloxide::prelude::*;
@@ -14,7 +14,7 @@ pub async fn start_add_token(
         InMemStorage<crate::telegram::flows::add_token::AddTokenState>,
     >,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -36,7 +36,7 @@ pub async fn list_tokens(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -64,8 +64,7 @@ pub async fn list_tokens(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Tracked tokens:\n{text}"))
-        .await?;
+    reply::send_text(&bot, msg.chat.id, format!("Tracked tokens:\n{text}")).await?;
     Ok(())
 }
 
@@ -75,7 +74,7 @@ pub async fn delete_token(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 

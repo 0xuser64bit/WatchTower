@@ -3,14 +3,13 @@ use crate::db::repos::rules::RuleRepo;
 use crate::rules::evaluate;
 use crate::rules::types::{Operator, RuleKind, RuleOutcome, Sample};
 use std::collections::HashMap;
-use std::time::Duration;
 use teloxide::types::ChatId;
 use tracing::{debug, info, warn};
 
 const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
 
 pub async fn run(state: AppState, admin_chat_id: ChatId) {
-    let interval = Duration::from_secs(state.settings.poll_interval_seconds);
+    let interval = state.settings.poll_interval;
 
     info!(
         interval_secs = interval.as_secs(),
@@ -150,19 +149,17 @@ mod tests {
     }
 
     fn settings() -> Arc<Settings> {
-        Arc::new(Settings {
-            telegram_bot_token: "test".into(),
-            admin_telegram_ids: vec![1],
-            database_url: "sqlite::memory:".into(),
-            coingecko_api_url: "http://localhost".into(),
-            price_fallback_urls: vec![],
-            solana_rpc_endpoints: vec!["http://localhost".into()],
-            solana_rpc_commitment: "confirmed".into(),
-            poll_interval_seconds: 60,
-            alert_default_cooldown_seconds: 300,
-            log_dir: "logs".into(),
-            log_max_files: 14,
-        })
+        Arc::new(
+            Settings::from_env_map(&std::collections::HashMap::from([
+                (
+                    "TELEGRAM_BOT_TOKEN".to_string(),
+                    "1234567890:test-token".to_string(),
+                ),
+                ("ADMIN_TELEGRAM_IDS".to_string(), "1".to_string()),
+                ("DATABASE_URL".to_string(), "sqlite::memory:".to_string()),
+            ]))
+            .expect("valid test settings"),
+        )
     }
 
     fn state(db: Arc<Db>, price: f64, lamports: u64) -> AppState {

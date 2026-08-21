@@ -1,3 +1,4 @@
+use crate::config::Commitment;
 use crate::providers::{ChainProvider, ProviderError, ProviderResult};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -15,7 +16,7 @@ pub struct SolanaRpcProvider {
     client: Client,
     endpoints: Arc<Vec<RpcEndpoint>>,
     next_index: Arc<AtomicUsize>,
-    commitment: String,
+    commitment: Commitment,
 }
 
 #[derive(Debug)]
@@ -42,9 +43,19 @@ struct BalanceResult {
 }
 
 impl SolanaRpcProvider {
-    pub fn new(endpoints: Vec<String>, commitment: &str) -> ProviderResult<Self> {
+    pub fn new(
+        endpoints: Vec<String>,
+        commitment: Commitment,
+        timeout: Duration,
+    ) -> ProviderResult<Self> {
+        if endpoints.is_empty() {
+            return Err(ProviderError::Unavailable(
+                "no RPC endpoints configured".into(),
+            ));
+        }
+
         let client = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(timeout)
             .build()
             .map_err(ProviderError::Http)?;
 
@@ -61,7 +72,7 @@ impl SolanaRpcProvider {
             client,
             endpoints: Arc::new(rpc_endpoints),
             next_index: Arc::new(AtomicUsize::new(0)),
-            commitment: commitment.to_string(),
+            commitment,
         })
     }
 
@@ -186,7 +197,7 @@ impl SolanaRpcProvider {
 impl ChainProvider for SolanaRpcProvider {
     async fn get_native_balance_lamports(&self, address: &str) -> ProviderResult<u64> {
         let params = json!([address, {
-            "commitment": self.commitment,
+            "commitment": self.commitment.as_str(),
         }]);
 
         let result: BalanceResult = self.call("getBalance", params).await?;

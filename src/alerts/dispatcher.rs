@@ -67,7 +67,7 @@ impl AlertDispatcher {
     }
 
     async fn send_to_admins(&self, message: String, fallback_chat_id: ChatId) {
-        let admins = match UserRepo::new(&self.db).list_admins().await {
+        let admins = match UserRepo::new(&self.db).list_active_admins().await {
             Ok(admins) => admins,
             Err(err) => {
                 warn!(%err, "failed to load admin recipients");

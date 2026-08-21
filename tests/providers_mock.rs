@@ -1,6 +1,7 @@
 use chainsentinel::providers::price::coingecko::CoinGeckoProvider;
 use chainsentinel::providers::PriceProvider;
 use mockito::Server;
+use std::time::Duration;
 
 #[tokio::test]
 async fn fetches_native_price() {
@@ -19,7 +20,8 @@ async fn fetches_native_price() {
         .create_async()
         .await;
 
-    let provider = CoinGeckoProvider::new(&url, &[]).unwrap();
+    let provider =
+        CoinGeckoProvider::new(std::slice::from_ref(&url), Duration::from_secs(5)).unwrap();
     let price = provider.get_native_price_usd().await.unwrap();
 
     mock.assert_async().await;
@@ -52,8 +54,11 @@ async fn falls_back_when_primary_fails() {
         .create_async()
         .await;
 
-    let provider =
-        CoinGeckoProvider::new(&primary_url, std::slice::from_ref(&fallback_url)).unwrap();
+    let provider = CoinGeckoProvider::new(
+        &[primary_url.clone(), fallback_url.clone()],
+        Duration::from_secs(5),
+    )
+    .unwrap();
     let price = provider.get_native_price_usd().await.unwrap();
 
     fallback_mock.assert_async().await;

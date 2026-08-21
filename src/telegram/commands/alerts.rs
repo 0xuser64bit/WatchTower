@@ -1,7 +1,7 @@
 use crate::db::repos::alert_events::AlertEventRepo;
 use crate::db::repos::rules::RuleRepo;
 use crate::db::Db;
-use crate::telegram::auth;
+use crate::telegram::reply;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
@@ -10,7 +10,7 @@ pub async fn list_alerts(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -41,8 +41,7 @@ pub async fn list_alerts(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Alert rules:\n{text}"))
-        .await?;
+    reply::send_text(&bot, msg.chat.id, format!("Alert rules:\n{text}")).await?;
     Ok(())
 }
 
@@ -51,7 +50,7 @@ pub async fn show_history(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -77,8 +76,7 @@ pub async fn show_history(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Recent alerts:\n{text}"))
-        .await?;
+    reply::send_text(&bot, msg.chat.id, format!("Recent alerts:\n{text}")).await?;
     Ok(())
 }
 
@@ -88,7 +86,7 @@ pub async fn delete_rule(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -121,15 +119,14 @@ pub async fn set_rule_enabled(
     id: i64,
     enabled: bool,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_or_send(&bot, &db, &msg).await.is_none() {
+    if reply::require_user(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
     match RuleRepo::new(&db).set_enabled(id, enabled).await {
         Ok(()) => {
             let status = if enabled { "enabled" } else { "disabled" };
-            bot.send_message(msg.chat.id, format!("Alert rule {status}."))
-                .await?;
+            reply::send_text(&bot, msg.chat.id, format!("Alert rule {status}.")).await?;
         }
         Err(_) => {
             bot.send_message(msg.chat.id, "Alert rule not found.")

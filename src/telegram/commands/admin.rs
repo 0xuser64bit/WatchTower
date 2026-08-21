@@ -1,6 +1,6 @@
 use crate::db::repos::users::{Role, UserRepo};
 use crate::db::Db;
-use crate::telegram::auth;
+use crate::telegram::reply;
 use std::sync::Arc;
 use teloxide::prelude::*;
 
@@ -9,10 +9,7 @@ pub async fn admin_menu(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -27,10 +24,7 @@ pub async fn list_users(
     db: Arc<Db>,
     msg: Message,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -38,14 +32,13 @@ pub async fn list_users(
     let text = users
         .iter()
         .map(|user| {
-            let blocked = if user.is_blocked() { " (blocked)" } else { "" };
-            format!("{}: {}{blocked}", user.telegram_id, user.role())
+            let blocked = if user.blocked { " (blocked)" } else { "" };
+            format!("{}: {}{blocked}", user.telegram_id, user.role)
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-    bot.send_message(msg.chat.id, format!("Users:\n{text}"))
-        .await?;
+    reply::send_text(&bot, msg.chat.id, format!("Users:\n{text}")).await?;
     Ok(())
 }
 
@@ -55,10 +48,7 @@ pub async fn add_admin(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -71,18 +61,9 @@ pub async fn add_admin(
         }
     };
 
-    let repo = UserRepo::new(&db);
-    match repo.find_by_telegram_id(target_id).await? {
-        Some(_) => {
-            repo.set_role(target_id, Role::Admin).await?;
-            bot.send_message(msg.chat.id, "User promoted to admin.")
-                .await?;
-        }
-        None => {
-            repo.create(target_id, Role::Admin).await?;
-            bot.send_message(msg.chat.id, "Admin user created.").await?;
-        }
-    }
+    UserRepo::new(&db).upsert(target_id, Role::Admin).await?;
+    bot.send_message(msg.chat.id, "User promoted to admin.")
+        .await?;
 
     Ok(())
 }
@@ -93,10 +74,7 @@ pub async fn demote_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -120,10 +98,7 @@ pub async fn block_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 
@@ -147,10 +122,7 @@ pub async fn unblock_user(
     msg: Message,
     args: String,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if auth::authorize_admin_or_send(&bot, &db, &msg)
-        .await
-        .is_none()
-    {
+    if reply::require_admin(&bot, &db, &msg).await.is_none() {
         return Ok(());
     }
 

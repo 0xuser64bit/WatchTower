@@ -59,12 +59,12 @@ async fn async_main() {
     }
 
     let db = Arc::new(db);
-    let bot = Bot::new(&settings.telegram_bot_token);
+    let bot = Bot::new(settings.telegram_bot_token.expose());
     let settings = Arc::new(settings);
     let shutdown = CancellationToken::new();
 
     let price_provider =
-        match CoinGeckoProvider::new(&settings.coingecko_api_url, &settings.price_fallback_urls) {
+        match CoinGeckoProvider::new(&settings.coingecko_api_urls, settings.http_timeout) {
             Ok(provider) => Arc::new(provider),
             Err(err) => {
                 tracing::error!(%err, "failed to build price provider");
@@ -74,7 +74,8 @@ async fn async_main() {
 
     let chain_provider = match SolanaRpcProvider::new(
         settings.solana_rpc_endpoints.clone(),
-        &settings.solana_rpc_commitment,
+        settings.solana_rpc_commitment,
+        settings.http_timeout,
     ) {
         Ok(provider) => Arc::new(provider),
         Err(err) => {
@@ -95,7 +96,7 @@ async fn async_main() {
     let admin_chat_id = ChatId(settings.admin_telegram_ids[0]);
 
     info!(
-        poll_interval = settings.poll_interval_seconds,
+        poll_interval_secs = settings.poll_interval.as_secs(),
         rpc_endpoints = settings.solana_rpc_endpoints.len(),
         "ChainSentinel starting"
     );
@@ -128,7 +129,7 @@ async fn seed_admins(db: &db::Db, admin_ids: &[i64]) -> crate::error::Result<()>
 
     for telegram_id in admin_ids {
         if repo.find_by_telegram_id(*telegram_id).await?.is_none() {
-            repo.create(*telegram_id, Role::Admin).await?;
+            repo.upsert(*telegram_id, Role::Admin).await?;
             info!(telegram_id, "seeded admin user");
         }
     }

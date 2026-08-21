@@ -11,24 +11,24 @@ async fn user_repo_crud() {
 
     let repo = UserRepo::new(&db);
 
-    let user = repo.create(123, Role::Admin).await.unwrap();
+    let user = repo.upsert(123, Role::Admin).await.unwrap();
     assert_eq!(user.telegram_id, 123);
-    assert_eq!(user.role(), Role::Admin);
+    assert_eq!(user.role, Role::Admin);
 
     let found = repo.find_by_telegram_id(123).await.unwrap().unwrap();
     assert_eq!(found.id, user.id);
 
     repo.set_role(123, Role::User).await.unwrap();
     let updated = repo.find_by_telegram_id(123).await.unwrap().unwrap();
-    assert_eq!(updated.role(), Role::User);
+    assert_eq!(updated.role, Role::User);
 
     repo.set_blocked(123, true).await.unwrap();
     let blocked = repo.find_by_telegram_id(123).await.unwrap().unwrap();
-    assert!(blocked.is_blocked());
+    assert!(blocked.blocked);
 
     repo.set_blocked(123, false).await.unwrap();
     let unblocked = repo.find_by_telegram_id(123).await.unwrap().unwrap();
-    assert!(!unblocked.is_blocked());
+    assert!(!unblocked.blocked);
 }
 
 #[tokio::test]
@@ -37,15 +37,15 @@ async fn user_repo_lists_only_unblocked_admins() {
     db.migrate().await.unwrap();
 
     let repo = UserRepo::new(&db);
-    repo.create(111, Role::Admin).await.unwrap();
-    repo.create(222, Role::Admin).await.unwrap();
-    repo.create(333, Role::User).await.unwrap();
+    repo.upsert(111, Role::Admin).await.unwrap();
+    repo.upsert(222, Role::Admin).await.unwrap();
+    repo.upsert(333, Role::User).await.unwrap();
 
-    let admins = repo.list_admins().await.unwrap();
+    let admins = repo.list_active_admins().await.unwrap();
     assert_eq!(admins.len(), 2);
 
     repo.set_blocked(222, true).await.unwrap();
-    let admins = repo.list_admins().await.unwrap();
+    let admins = repo.list_active_admins().await.unwrap();
     assert_eq!(admins.len(), 1);
     assert_eq!(admins[0].telegram_id, 111);
 }
