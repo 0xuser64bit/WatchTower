@@ -115,3 +115,108 @@ async fn batches_real_balances_and_treats_missing_accounts_as_zero() {
         "the USDC mint account should hold lamports"
     );
 }
+
+/// One real monitoring cycle: real price API, real Solana RPC, real database, real
+/// evaluation and persistence. Telegram delivery is expected to fail (no valid token),
+/// which is itself worth exercising — a delivery failure must not lose the alert.
+#[tokio::test]
+#[ignore = "requires network access to CoinGecko and a Solana RPC endpoint"]
+async fn a_real_monitoring_cycle_reads_evaluates_and_records() {
+    use chainsentinel::app_state::AppState;
+    use chainsentinel::config::Settings;
+    use chainsentinel::db::repos::alert_events::AlertEventRepo;
+    use chainsentinel::db::repos::rules::{NewRuleTarget, RuleRepo};
+    use chainsentinel::db::repos::tokens::TokenRepo;
+    use chainsentinel::db::repos::users::{Role, UserRepo};
+    use chainsentinel::db::repos::wallets::WalletRepo;
+    use chainsentinel::db::Db;
+    use chainsentinel::engine::scheduler;
+    use chainsentinel::providers::price::CoinGeckoProvider;
+    use chainsentinel::providers::solana::SolanaRpcProvider;
+    use chainsentinel::rules::types::{Operator, RuleState};
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    let db = Db::connect_in_memory().await.unwrap();
+    db.migrate().await.unwrap();
+    UserRepo::new(&db).upsert(1, Role::Admin).await.unwrap();
+    let db = Arc::new(db);
+
+    let settings = Settings::from_env_map(&HashMap::from([
+        (
+            "TELEGRAM_BOT_TOKEN".to_string(),
+            "1234567890:live-test-token".to_string(),
+        ),
+        ("ADMIN_TELEGRAM_IDS".to_string(), "1".to_string()),
+    ]))
+    .unwrap();
+
+    let price =
+        Arc::new(CoinGeckoProvider::new(&settings.coingecko_api_urls, None, timeout()).unwrap());
+    let chain = Arc::new(
+        SolanaRpcProvider::new(
+            settings.solana_rpc_endpoints.clone(),
+            settings.solana_rpc_commitment,
+            timeout(),
+        )
+        .unwrap(),
+    );
+
+    let state = AppState::new(
+        db.clone(),
+        teloxide::Bot::new(settings.telegram_bot_token.expose()),
+        Arc::new(settings),
+        price,
+        chain,
+        tokio_util::sync::CancellationToken::new(),
+    );
+
+    // USDC below $2 and the token program above 0 SOL: both true right now, so both
+    // rules must fire on the first cycle.
+    let token = TokenRepo::new(&state.db)
+        .create(USDC_MINT, Some("USDC"))
+        .await
+        .unwrap();
+    let wallet = WalletRepo::new(&state.db)
+        .create(TOKEN_PROGRAM, Some("Token program"))
+        .await
+        .unwrap();
+
+    let repo = RuleRepo::new(&state.db);
+    repo.create(NewRuleTarget::Token { id: token.id }, Operator::Lt, 2.0, 0)
+        .await
+        .unwrap();
+    repo.create(
+        NewRuleTarget::Wallet { id: wallet.id },
+        Operator::Gt,
+        0.000_001,
+        0,
+    )
+    .await
+    .unwrap();
+
+    let report = scheduler::tick(&state).await.unwrap();
+    println!("live tick: {report:?}");
+
+    assert_eq!(report.rules_evaluated, 2, "both targets should be readable");
+    assert_eq!(report.targets_unavailable, 0);
+    assert_eq!(report.alerts_sent, 2);
+
+    for rule in repo.list_all().await.unwrap() {
+        println!(
+            "  rule {} {:?} last_value={:?} state={:?}",
+            rule.id, rule.target.kind, rule.last_value, rule.state
+        );
+        assert!(rule.last_value.is_some(), "rule {} has no reading", rule.id);
+        assert_eq!(rule.state, RuleState::Firing);
+        assert!(rule.last_triggered_at.is_some());
+    }
+
+    // Delivery failed (the token is not real), but the alerts must still be recorded.
+    assert_eq!(AlertEventRepo::new(&state.db).count().await.unwrap(), 2);
+
+    // A second cycle must be silent: the conditions are unchanged.
+    let report = scheduler::tick(&state).await.unwrap();
+    assert_eq!(report.alerts_sent, 0);
+    assert_eq!(AlertEventRepo::new(&state.db).count().await.unwrap(), 2);
+}

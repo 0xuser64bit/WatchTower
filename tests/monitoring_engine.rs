@@ -508,3 +508,37 @@ async fn history_pruning_respects_the_retention_window() {
 
     drop(h.server);
 }
+
+#[tokio::test]
+async fn re_enabling_a_rule_clears_its_cooldown_so_the_next_breach_alerts() {
+    let h = harness().await;
+    h.price.set(MINT, Ok(150.0));
+
+    let token = TokenRepo::new(&h.state.db)
+        .create(MINT, None)
+        .await
+        .unwrap();
+    let repo = RuleRepo::new(&h.state.db);
+    // A long cooldown, so only an explicit reset can allow a second alert.
+    let rule = repo
+        .create(
+            NewRuleTarget::Token { id: token.id },
+            Operator::Gt,
+            100.0,
+            3_600,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(scheduler::tick(&h.state).await.unwrap().alerts_sent, 1);
+
+    // Toggling a rule off and on is an explicit request to re-arm it. Keeping the old
+    // trigger time would latch it straight back to firing and swallow the alert.
+    repo.set_enabled(rule.id, false).await.unwrap();
+    let reenabled = repo.set_enabled(rule.id, true).await.unwrap();
+    assert_eq!(reenabled.last_triggered_at, None);
+    assert_eq!(reenabled.state, RuleState::Ok);
+
+    assert_eq!(scheduler::tick(&h.state).await.unwrap().alerts_sent, 1);
+    assert_eq!(AlertEventRepo::new(&h.state.db).count().await.unwrap(), 2);
+}
