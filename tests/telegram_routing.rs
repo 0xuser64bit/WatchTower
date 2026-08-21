@@ -196,3 +196,158 @@ async fn a_command_cancels_an_active_flow() {
 async fn cancel_reports_whether_a_flow_was_active() {
     assert_reply_contains("/cancel", "Nothing to cancel.").await;
 }
+
+#[tokio::test]
+async fn group_chats_are_refused_and_never_enter_a_flow() {
+    let mut server = mockito::Server::new_async().await;
+
+    let refusal = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::Regex(regex::escape(
+            "only works in a direct message",
+        )))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db,
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+    let storage = InMemStorage::<DialogueState>::new();
+
+    // Dialogue state is keyed by chat, so a flow started in a group would make the
+    // next message from any member — authorized or not — the answer to that step.
+    support::dispatch(
+        &state,
+        storage.clone(),
+        support::group_message_from(support::ADMIN_ID, "/addtoken"),
+    )
+    .await
+    .expect("dispatch");
+
+    refusal.assert_async().await;
+
+    let stored: DialogueState = teloxide::dispatching::dialogue::Storage::get_dialogue(
+        storage,
+        teloxide::types::ChatId(-100_123),
+    )
+    .await
+    .expect("storage read")
+    .unwrap_or_default();
+
+    assert_eq!(stored, DialogueState::Idle, "no flow may start in a group");
+}
+
+#[tokio::test]
+async fn non_command_group_messages_are_ignored_silently() {
+    let mut server = mockito::Server::new_async().await;
+
+    // Replying to ordinary group chatter would be noise and could trip Telegram's
+    // flood limits.
+    let silent = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(0)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db,
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    support::dispatch(
+        &state,
+        InMemStorage::<DialogueState>::new(),
+        support::group_message_from(support::ADMIN_ID, "good morning"),
+    )
+    .await
+    .expect("dispatch");
+
+    silent.assert_async().await;
+}
+
+#[tokio::test]
+async fn blocking_a_user_takes_effect_mid_flow() {
+    use chainsentinel::db::repos::users::UserRepo;
+
+    let mut server = mockito::Server::new_async().await;
+
+    let _prompts = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    // Priced, so nothing else in the flow can stop it: the authorization check is the
+    // only thing standing between the blocked user and a created token.
+    let price = Arc::new(support::FakePriceProvider::with_price(
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        1.0,
+    ));
+    let state = support::app_state(
+        db.clone(),
+        &server.url(),
+        price,
+        Arc::new(support::FakeChainProvider::new()),
+    );
+    let storage = InMemStorage::<DialogueState>::new();
+
+    support::dispatch(&state, storage.clone(), support::message("/addtoken"))
+        .await
+        .expect("start flow");
+
+    // Revoked while the user sits on a flow step. Flow steps must re-authorize, not
+    // trust that access was checked when the flow began.
+    UserRepo::new(&db)
+        .set_blocked(support::ADMIN_ID, true)
+        .await
+        .unwrap();
+
+    // Drive the flow all the way to its confirmation. Every one of these steps must
+    // be refused; stopping after one would pass even with no check at all, because a
+    // single step does not yet write anything.
+    for answer in [
+        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        "USDC",
+        "yes",
+    ] {
+        support::dispatch(&state, storage.clone(), support::message(answer))
+            .await
+            .expect("dispatch");
+    }
+
+    assert!(
+        chainsentinel::db::repos::tokens::TokenRepo::new(&db)
+            .list()
+            .await
+            .unwrap()
+            .is_empty(),
+        "a blocked user must not be able to complete a flow they had already started"
+    );
+}

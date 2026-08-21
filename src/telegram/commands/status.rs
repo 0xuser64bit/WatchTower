@@ -24,11 +24,13 @@ pub async fn status(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    match build(&state).await {
-        Ok(text) => reply::send_text(&state.bot, msg.chat.id, text).await?,
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "status", &err).await,
-    }
+    let outcome = render(&state, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "status", outcome).await
+}
 
+async fn render(state: &AppState, msg: &Message) -> crate::error::Result<()> {
+    let text = build(state).await?;
+    reply::send_text(&state.bot, msg.chat.id, text).await?;
     Ok(())
 }
 

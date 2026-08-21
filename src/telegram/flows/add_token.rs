@@ -6,6 +6,7 @@
 
 use crate::app_state::AppState;
 use crate::db::repos::tokens::TokenRepo;
+use crate::error::Result;
 use crate::providers::solana::is_valid_address;
 use crate::providers::ProviderError;
 use crate::telegram::flows::{optional_answer, reprompt, text_of, FlowDialogue, HandlerResult};
@@ -43,6 +44,11 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
         return Ok(());
     }
 
+    let outcome = start_body(&state, &dialogue, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "add_token.start", outcome).await
+}
+
+async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
     reply::send_text(
         &state.bot,
         msg.chat.id,
@@ -50,19 +56,24 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
     )
     .await?;
 
-    dialogue.update(Step::AwaitingMint).await?;
+    super::advance(dialogue, Step::AwaitingMint).await?;
     Ok(())
 }
 
 async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let Some(mint) = text_of(&msg) else {
-        return reprompt(&state, &msg, "Send the mint address as text.").await;
+    let outcome = await_mint_body(&state, &dialogue, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "add_token.mint", outcome).await
+}
+
+async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
+    let Some(mint) = text_of(msg) else {
+        return reprompt(state, msg, "Send the mint address as text.").await;
     };
 
     if !is_valid_address(mint) {
         return reprompt(
-            &state,
-            &msg,
+            state,
+            msg,
             "That is not a valid Solana address. A mint address is 32-44 base58 characters.",
         )
         .await;
@@ -81,7 +92,7 @@ async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> Ha
             ),
         )
         .await?;
-        super::reset(&dialogue).await;
+        super::reset(dialogue).await;
         return Ok(());
     }
 
@@ -96,7 +107,7 @@ async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> Ha
                  alert could never fire. Not adding it.",
             )
             .await?;
-            super::reset(&dialogue).await;
+            super::reset(dialogue).await;
             return Ok(());
         }
         Err(err) => {
@@ -121,9 +132,7 @@ async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> Ha
     )
     .await?;
 
-    dialogue
-        .update(Step::AwaitingSymbol { mint, price })
-        .await?;
+    super::advance(dialogue, Step::AwaitingSymbol { mint, price }).await?;
     Ok(())
 }
 
@@ -133,15 +142,25 @@ async fn await_symbol(
     msg: Message,
     (mint, _price): (String, Option<f64>),
 ) -> HandlerResult {
-    let Some(raw) = text_of(&msg) else {
-        return reprompt(&state, &msg, "Send a symbol as text, or `-` to skip.").await;
+    let outcome = await_symbol_body(&state, &dialogue, &msg, (mint, _price)).await;
+    reply::finish(&state.bot, msg.chat.id, "add_token.symbol", outcome).await
+}
+
+async fn await_symbol_body(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    msg: &Message,
+    (mint, _price): (String, Option<f64>),
+) -> Result<()> {
+    let Some(raw) = text_of(msg) else {
+        return reprompt(state, msg, "Send a symbol as text, or `-` to skip.").await;
     };
 
     let symbol = optional_answer(raw);
 
     if let Some(symbol) = &symbol {
         if symbol.chars().count() > 32 {
-            return reprompt(&state, &msg, "Keep the symbol to 32 characters or fewer.").await;
+            return reprompt(state, msg, "Keep the symbol to 32 characters or fewer.").await;
         }
     }
 
@@ -155,7 +174,7 @@ async fn await_symbol(
     )
     .await?;
 
-    dialogue.update(Step::Confirming { mint, symbol }).await?;
+    super::advance(dialogue, Step::Confirming { mint, symbol }).await?;
     Ok(())
 }
 
@@ -165,9 +184,19 @@ async fn confirm(
     msg: Message,
     (mint, symbol): (String, Option<String>),
 ) -> HandlerResult {
-    if !super::is_affirmative(text_of(&msg)) {
-        super::reset(&dialogue).await;
-        return reprompt(&state, &msg, "Cancelled. Nothing was added.").await;
+    let outcome = confirm_body(&state, &dialogue, &msg, (mint, symbol)).await;
+    reply::finish(&state.bot, msg.chat.id, "add_token.confirm", outcome).await
+}
+
+async fn confirm_body(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    msg: &Message,
+    (mint, symbol): (String, Option<String>),
+) -> Result<()> {
+    if !super::is_affirmative(text_of(msg)) {
+        super::reset(dialogue).await;
+        return reprompt(state, msg, "Cancelled. Nothing was added.").await;
     }
 
     match TokenRepo::new(&state.db)
@@ -191,6 +220,6 @@ async fn confirm(
         }
     }
 
-    super::reset(&dialogue).await;
+    super::reset(dialogue).await;
     Ok(())
 }

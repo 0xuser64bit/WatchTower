@@ -77,6 +77,30 @@ pub async fn help(state: AppState, msg: Message) -> HandlerResult {
     Ok(())
 }
 
+/// Refuses group, supergroup, and channel chats.
+///
+/// Replies only to an apparent command attempt: answering every message in a group
+/// the bot happens to be in would be noise, and could trip Telegram's flood limits.
+pub async fn non_private_chat(state: AppState, msg: Message) -> HandlerResult {
+    let looks_like_a_command = msg.text().is_some_and(|text| text.starts_with('/'));
+
+    if looks_like_a_command {
+        tracing::info!(
+            chat_id = msg.chat.id.0,
+            "refused a command from a non-private chat"
+        );
+        reply::try_send(
+            &state.bot,
+            msg.chat.id,
+            "ChainSentinel only works in a direct message. Open a private chat with me \
+             and send /start.",
+        )
+        .await;
+    }
+
+    Ok(())
+}
+
 /// Anything that is not a command and not part of an active flow.
 pub async fn fallback(state: AppState, msg: Message) -> HandlerResult {
     // Authorize first: an unknown sender must not learn anything about the bot.

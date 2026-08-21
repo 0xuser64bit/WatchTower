@@ -39,12 +39,6 @@ pub struct AuthUser {
     pub role: Role,
 }
 
-impl AuthUser {
-    pub fn is_admin(&self) -> bool {
-        self.role == Role::Admin
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct User {
     pub id: i64,

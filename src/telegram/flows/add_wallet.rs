@@ -5,6 +5,7 @@
 
 use crate::app_state::AppState;
 use crate::db::repos::wallets::WalletRepo;
+use crate::error::Result;
 use crate::providers::solana::is_valid_address;
 use crate::telegram::flows::{
     is_affirmative, optional_answer, reprompt, text_of, FlowDialogue, HandlerResult,
@@ -44,6 +45,11 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
         return Ok(());
     }
 
+    let outcome = start_body(&state, &dialogue, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "add_wallet.start", outcome).await
+}
+
+async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
     reply::send_text(
         &state.bot,
         msg.chat.id,
@@ -51,19 +57,28 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
     )
     .await?;
 
-    dialogue.update(Step::AwaitingAddress).await?;
+    super::advance(dialogue, Step::AwaitingAddress).await?;
     Ok(())
 }
 
 async fn await_address(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let Some(address) = text_of(&msg) else {
-        return reprompt(&state, &msg, "Send the wallet address as text.").await;
+    let outcome = await_address_body(&state, &dialogue, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "add_wallet.address", outcome).await
+}
+
+async fn await_address_body(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    msg: &Message,
+) -> Result<()> {
+    let Some(address) = text_of(msg) else {
+        return reprompt(state, msg, "Send the wallet address as text.").await;
     };
 
     if !is_valid_address(address) {
         return reprompt(
-            &state,
-            &msg,
+            state,
+            msg,
             "That is not a valid Solana address. Addresses are 32-44 base58 characters.",
         )
         .await;
@@ -82,7 +97,7 @@ async fn await_address(state: AppState, dialogue: FlowDialogue, msg: Message) ->
             ),
         )
         .await?;
-        super::reset(&dialogue).await;
+        super::reset(dialogue).await;
         return Ok(());
     }
 
@@ -109,7 +124,7 @@ async fn await_address(state: AppState, dialogue: FlowDialogue, msg: Message) ->
     )
     .await?;
 
-    dialogue.update(Step::AwaitingLabel { address }).await?;
+    super::advance(dialogue, Step::AwaitingLabel { address }).await?;
     Ok(())
 }
 
@@ -119,15 +134,25 @@ async fn await_label(
     msg: Message,
     address: String,
 ) -> HandlerResult {
-    let Some(raw) = text_of(&msg) else {
-        return reprompt(&state, &msg, "Send a label as text, or `-` to skip.").await;
+    let outcome = await_label_body(&state, &dialogue, &msg, address).await;
+    reply::finish(&state.bot, msg.chat.id, "add_wallet.label", outcome).await
+}
+
+async fn await_label_body(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    msg: &Message,
+    address: String,
+) -> Result<()> {
+    let Some(raw) = text_of(msg) else {
+        return reprompt(state, msg, "Send a label as text, or `-` to skip.").await;
     };
 
     let label = optional_answer(raw);
 
     if let Some(label) = &label {
         if label.chars().count() > 64 {
-            return reprompt(&state, &msg, "Keep the label to 64 characters or fewer.").await;
+            return reprompt(state, msg, "Keep the label to 64 characters or fewer.").await;
         }
     }
 
@@ -141,7 +166,7 @@ async fn await_label(
     )
     .await?;
 
-    dialogue.update(Step::Confirming { address, label }).await?;
+    super::advance(dialogue, Step::Confirming { address, label }).await?;
     Ok(())
 }
 
@@ -151,9 +176,19 @@ async fn confirm(
     msg: Message,
     (address, label): (String, Option<String>),
 ) -> HandlerResult {
-    if !is_affirmative(text_of(&msg)) {
-        super::reset(&dialogue).await;
-        return reprompt(&state, &msg, "Cancelled. Nothing was added.").await;
+    let outcome = confirm_body(&state, &dialogue, &msg, (address, label)).await;
+    reply::finish(&state.bot, msg.chat.id, "add_wallet.confirm", outcome).await
+}
+
+async fn confirm_body(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    msg: &Message,
+    (address, label): (String, Option<String>),
+) -> Result<()> {
+    if !is_affirmative(text_of(msg)) {
+        super::reset(dialogue).await;
+        return reprompt(state, msg, "Cancelled. Nothing was added.").await;
     }
 
     match WalletRepo::new(&state.db)
@@ -175,6 +210,6 @@ async fn confirm(
         Err(err) => reply::report_error(&state.bot, msg.chat.id, "add_wallet", &err).await,
     }
 
-    super::reset(&dialogue).await;
+    super::reset(dialogue).await;
     Ok(())
 }

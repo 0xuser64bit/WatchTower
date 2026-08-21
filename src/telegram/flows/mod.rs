@@ -65,8 +65,9 @@ pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         .branch(case![DialogueState::AddAlert(step)].branch(add_alert::handler()))
 }
 
-/// Shared "reply and stop" used when a flow step receives something unusable.
-pub async fn reprompt(state: &AppState, msg: &Message, text: &str) -> HandlerResult {
+/// Shared "reply and stop" used when a flow step receives something unusable. The
+/// step stays where it is, so the user can simply answer again.
+pub async fn reprompt(state: &AppState, msg: &Message, text: &str) -> crate::error::Result<()> {
     reply::send_text(&state.bot, msg.chat.id, text).await?;
     Ok(())
 }
@@ -93,6 +94,20 @@ pub async fn cancel(state: AppState, current: DialogueState, msg: Message) -> Ha
 
     reply::send_text(&state.bot, msg.chat.id, text).await?;
     Ok(())
+}
+
+/// Moves a flow to its next step.
+///
+/// Wraps the storage error so flow bodies can use `?` uniformly and any failure is
+/// reported to the user by the handler boundary rather than vanishing into a log.
+pub async fn advance<S>(dialogue: &FlowDialogue, step: S) -> crate::error::Result<()>
+where
+    DialogueState: From<S>,
+{
+    dialogue
+        .update(step)
+        .await
+        .map_err(|err| crate::error::AppError::Internal(format!("dialogue storage: {err}")))
 }
 
 /// Clears a dialogue, tolerating the case where it is already absent.

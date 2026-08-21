@@ -125,10 +125,31 @@ pub fn schema() -> UpdateHandler<HandlerError> {
             },
         ));
 
-    // Order is load-bearing: commands, then active flow steps, then the catch-all.
+    // Order is load-bearing.
+    //
+    // 1. Non-private chats are refused outright. Dialogue state is keyed by chat, so
+    //    in a group an admin starting a flow would make the next message from *any*
+    //    member the answer to that step — an unauthorized user could supply the mint
+    //    or send the confirmation. Alerts are also delivered to individual admins,
+    //    so group operation was never coherent.
+    // 2. Commands, which clear any flow first.
+    // 3. Steps of an active flow, re-authorized on every message so that blocking a
+    //    user takes effect immediately even mid-flow.
+    // 4. Everything else.
     let message_handler = Update::filter_message()
+        .branch(
+            dptree::filter(|msg: Message| !msg.chat.is_private())
+                .endpoint(commands::non_private_chat),
+        )
         .branch(command_handler)
-        .branch(flows::handler())
+        .branch(
+            dptree::filter_map_async(|state: AppState, msg: Message| async move {
+                // Returns `None` on denial so the request falls through to the
+                // fallback branch, which issues exactly one denial reply.
+                reply::is_authorized(&state.db, &msg).await.then_some(())
+            })
+            .chain(flows::handler()),
+        )
         .branch(dptree::endpoint(commands::fallback));
 
     dialogue::enter::<Update, InMemStorage<DialogueState>, DialogueState, _>()

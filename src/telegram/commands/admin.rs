@@ -8,6 +8,7 @@
 
 use crate::app_state::AppState;
 use crate::db::repos::users::{Role, UserRepo};
+use crate::error::Result;
 use crate::telegram::commands::parse_id;
 use crate::telegram::flows::HandlerResult;
 use crate::telegram::reply;
@@ -33,7 +34,7 @@ pub async fn panel(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    reply::send_text(&state.bot, msg.chat.id, PANEL).await?;
+    reply::try_send(&state.bot, msg.chat.id, PANEL).await;
     Ok(())
 }
 
@@ -42,13 +43,12 @@ pub async fn list_users(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     };
 
-    let users = match UserRepo::new(&state.db).list().await {
-        Ok(users) => users,
-        Err(err) => {
-            reply::report_error(&state.bot, msg.chat.id, "list_users", &err).await;
-            return Ok(());
-        }
-    };
+    let outcome = render_users(&state, &msg, actor.telegram_id).await;
+    reply::finish(&state.bot, msg.chat.id, "list_users", outcome).await
+}
+
+async fn render_users(state: &AppState, msg: &Message, actor_id: i64) -> Result<()> {
+    let users = UserRepo::new(&state.db).list().await?;
 
     let body = users
         .iter()
@@ -57,7 +57,7 @@ pub async fn list_users(state: AppState, msg: Message) -> HandlerResult {
             if user.blocked {
                 flags.push("blocked".to_string());
             }
-            if user.telegram_id == actor.telegram_id {
+            if user.telegram_id == actor_id {
                 flags.push("you".to_string());
             }
             format!("{} — {}", user.telegram_id, flags.join(", "))
@@ -86,23 +86,25 @@ pub async fn add_admin(state: AppState, msg: Message, args: String) -> HandlerRe
         return Ok(());
     };
 
-    match UserRepo::new(&state.db).upsert(target, Role::Admin).await {
-        Ok(user) => {
-            let note = if user.blocked {
-                " They are still blocked — use /unblock to restore access."
-            } else {
-                ""
-            };
-            reply::send_text(
-                &state.bot,
-                msg.chat.id,
-                format!("{target} is now an admin.{note}"),
-            )
-            .await?;
-        }
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "add_admin", &err).await,
-    }
+    let outcome = promote(&state, &msg, target).await;
+    reply::finish(&state.bot, msg.chat.id, "add_admin", outcome).await
+}
 
+async fn promote(state: &AppState, msg: &Message, target: i64) -> Result<()> {
+    let user = UserRepo::new(&state.db).upsert(target, Role::Admin).await?;
+
+    let note = if user.blocked {
+        " They are still blocked — use /unblock to restore access."
+    } else {
+        ""
+    };
+
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!("{target} is now an admin.{note}"),
+    )
+    .await?;
     Ok(())
 }
 
@@ -125,24 +127,25 @@ pub async fn demote(state: AppState, msg: Message, args: String) -> HandlerResul
         return Ok(());
     }
 
-    let repo = UserRepo::new(&state.db);
+    let outcome = revoke_admin(&state, &msg, target).await;
+    reply::finish(&state.bot, msg.chat.id, "demote", outcome).await
+}
 
-    if would_remove_last_admin(&state, target, &msg).await? {
+async fn revoke_admin(state: &AppState, msg: &Message, target: i64) -> Result<()> {
+    if would_remove_last_admin(state, target, msg).await? {
         return Ok(());
     }
 
-    match repo.set_role(target, Role::User).await {
-        Ok(()) => {
-            reply::send_text(
-                &state.bot,
-                msg.chat.id,
-                format!("{target} is no longer an admin and will stop receiving alerts."),
-            )
-            .await?
-        }
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "demote", &err).await,
-    }
+    UserRepo::new(&state.db)
+        .set_role(target, Role::User)
+        .await?;
 
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!("{target} is no longer an admin and will stop receiving alerts."),
+    )
+    .await?;
     Ok(())
 }
 
@@ -167,41 +170,36 @@ pub async fn set_blocked(
         return Ok(());
     }
 
-    if blocked && would_remove_last_admin(&state, target, &msg).await? {
-        return Ok(());
-    }
-
-    match UserRepo::new(&state.db).set_blocked(target, blocked).await {
-        Ok(()) => {
-            let text = if blocked {
-                format!("{target} is blocked and will no longer receive alerts.")
-            } else {
-                format!("{target} is unblocked.")
-            };
-            reply::send_text(&state.bot, msg.chat.id, text).await?;
-        }
-        Err(err) => {
-            reply::report_error(&state.bot, msg.chat.id, command_context(blocked), &err).await
-        }
-    }
-
-    Ok(())
-}
-
-fn command_context(blocked: bool) -> &'static str {
-    if blocked {
+    let outcome = apply_block(&state, &msg, target, blocked).await;
+    let context = if blocked {
         "block_user"
     } else {
         "unblock_user"
+    };
+    reply::finish(&state.bot, msg.chat.id, context, outcome).await
+}
+
+async fn apply_block(state: &AppState, msg: &Message, target: i64, blocked: bool) -> Result<()> {
+    if blocked && would_remove_last_admin(state, target, msg).await? {
+        return Ok(());
     }
+
+    UserRepo::new(&state.db)
+        .set_blocked(target, blocked)
+        .await?;
+
+    let text = if blocked {
+        format!("{target} is blocked and will no longer receive alerts.")
+    } else {
+        format!("{target} is unblocked.")
+    };
+
+    reply::send_text(&state.bot, msg.chat.id, text).await?;
+    Ok(())
 }
 
 /// Replies and returns `true` when the action would leave zero active admins.
-async fn would_remove_last_admin(
-    state: &AppState,
-    target: i64,
-    msg: &Message,
-) -> crate::error::Result<bool> {
+async fn would_remove_last_admin(state: &AppState, target: i64, msg: &Message) -> Result<bool> {
     let repo = UserRepo::new(&state.db);
 
     let Some(user) = repo.find_by_telegram_id(target).await? else {

@@ -97,6 +97,24 @@ pub async fn report_error(bot: &Bot, chat_id: ChatId, context: &'static str, err
     try_send(bot, chat_id, err.user_message()).await;
 }
 
+/// Terminates a handler, reporting a failure to the user exactly once.
+///
+/// Every command and flow step funnels its result through here. Handlers used to `?`
+/// on repository calls, which returned the error to the dispatcher's error handler:
+/// it was logged, and the user was left staring at a chat that never replied.
+pub async fn finish(
+    bot: &Bot,
+    chat_id: ChatId,
+    context: &'static str,
+    outcome: crate::error::Result<()>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Err(err) = outcome {
+        report_error(bot, chat_id, context, &err).await;
+    }
+
+    Ok(())
+}
+
 /// Resolves the sender and replies with the denial reason when access is refused.
 /// Returns `None` when the handler must stop.
 pub async fn require_user(bot: &Bot, db: &Db, msg: &Message) -> Option<AuthUser> {
@@ -106,6 +124,15 @@ pub async fn require_user(bot: &Bot, db: &Db, msg: &Message) -> Option<AuthUser>
 /// As [`require_user`], additionally requiring the admin role.
 pub async fn require_admin(bot: &Bot, db: &Db, msg: &Message) -> Option<AuthUser> {
     resolve(bot, db, msg, true).await
+}
+
+/// Authorization check that does not reply, for use as a routing filter where a later
+/// branch is responsible for the response.
+pub async fn is_authorized(db: &Db, msg: &Message) -> bool {
+    matches!(
+        auth::authorize(db, msg).await,
+        Ok(Authorization::Allowed(_))
+    )
 }
 
 async fn resolve(bot: &Bot, db: &Db, msg: &Message, admin: bool) -> Option<AuthUser> {

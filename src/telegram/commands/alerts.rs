@@ -4,6 +4,7 @@ use crate::alerts::format;
 use crate::app_state::AppState;
 use crate::db::repos::alert_events::AlertEventRepo;
 use crate::db::repos::rules::RuleRepo;
+use crate::error::Result;
 use crate::rules::types::{Operator, Rule, RuleState};
 use crate::telegram::commands::parse_id;
 use crate::telegram::flows::HandlerResult;
@@ -20,13 +21,12 @@ pub async fn list_rules(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    let rules = match RuleRepo::new(&state.db).list_all().await {
-        Ok(rules) => rules,
-        Err(err) => {
-            reply::report_error(&state.bot, msg.chat.id, "list_rules", &err).await;
-            return Ok(());
-        }
-    };
+    let outcome = render_rules(&state, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "list_rules", outcome).await
+}
+
+async fn render_rules(state: &AppState, msg: &Message) -> Result<()> {
+    let rules = RuleRepo::new(&state.db).list_all().await?;
 
     if rules.is_empty() {
         reply::send_text(
@@ -111,30 +111,31 @@ pub async fn set_enabled(
         return Ok(());
     };
 
-    match RuleRepo::new(&state.db).set_enabled(id, enabled).await {
-        Ok(rule) => {
-            let verb = if enabled { "enabled" } else { "disabled" };
-            let note = if enabled && rule.operator.is_percentage() {
-                " Its baseline will be taken from the next observation."
-            } else {
-                ""
-            };
+    let outcome = toggle_rule(&state, &msg, id, enabled).await;
+    reply::finish(&state.bot, msg.chat.id, "set_rule_enabled", outcome).await
+}
 
-            reply::send_text(
-                &state.bot,
-                msg.chat.id,
-                format!(
-                    "Rule {} ({} {}) {verb}.{note}",
-                    rule.id,
-                    rule.target.display(),
-                    rule.condition()
-                ),
-            )
-            .await?;
-        }
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "set_rule_enabled", &err).await,
-    }
+async fn toggle_rule(state: &AppState, msg: &Message, id: i64, enabled: bool) -> Result<()> {
+    let rule = RuleRepo::new(&state.db).set_enabled(id, enabled).await?;
 
+    let verb = if enabled { "enabled" } else { "disabled" };
+    let note = if enabled && rule.operator.is_percentage() {
+        " Its baseline will be taken from the next observation."
+    } else {
+        ""
+    };
+
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!(
+            "Rule {} ({} {}) {verb}.{note}",
+            rule.id,
+            rule.target.display(),
+            rule.condition()
+        ),
+    )
+    .await?;
     Ok(())
 }
 
@@ -150,6 +151,11 @@ pub async fn delete_rule(state: AppState, msg: Message, args: String) -> Handler
         return Ok(());
     };
 
+    let outcome = remove_rule(&state, &msg, id).await;
+    reply::finish(&state.bot, msg.chat.id, "delete_rule", outcome).await
+}
+
+async fn remove_rule(state: &AppState, msg: &Message, id: i64) -> Result<()> {
     let repo = RuleRepo::new(&state.db);
 
     let Some(rule) = repo.find(id).await? else {
@@ -162,23 +168,19 @@ pub async fn delete_rule(state: AppState, msg: Message, args: String) -> Handler
         return Ok(());
     };
 
-    match repo.delete(id).await {
-        Ok(()) => {
-            reply::send_text(
-                &state.bot,
-                msg.chat.id,
-                format!(
-                    "Deleted rule {} ({} {}). Past alerts stay in /history.",
-                    rule.id,
-                    rule.target.display(),
-                    rule.condition()
-                ),
-            )
-            .await?;
-        }
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "delete_rule", &err).await,
-    }
+    repo.delete(id).await?;
 
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!(
+            "Deleted rule {} ({} {}). Past alerts stay in /history.",
+            rule.id,
+            rule.target.display(),
+            rule.condition()
+        ),
+    )
+    .await?;
     Ok(())
 }
 
@@ -190,16 +192,14 @@ pub async fn history(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    let events = match AlertEventRepo::new(&state.db)
+    let outcome = render_history(&state, &msg).await;
+    reply::finish(&state.bot, msg.chat.id, "history", outcome).await
+}
+
+async fn render_history(state: &AppState, msg: &Message) -> Result<()> {
+    let events = AlertEventRepo::new(&state.db)
         .list_recent(HISTORY_LIMIT)
-        .await
-    {
-        Ok(events) => events,
-        Err(err) => {
-            reply::report_error(&state.bot, msg.chat.id, "history", &err).await;
-            return Ok(());
-        }
-    };
+        .await?;
 
     if events.is_empty() {
         reply::send_text(&state.bot, msg.chat.id, "No alerts have fired yet.").await?;

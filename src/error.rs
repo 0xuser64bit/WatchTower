@@ -36,6 +36,10 @@ pub enum AppError {
 
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// A failure with no user-actionable cause, e.g. dialogue storage.
+    #[error("internal error: {0}")]
+    Internal(String),
 }
 
 impl AppError {

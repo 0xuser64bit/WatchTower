@@ -204,8 +204,17 @@ pub fn me() -> Me {
     .expect("me json")
 }
 
+/// Builds a group-chat text update from `sender`.
+pub fn group_message_from(sender: i64, text: &str) -> Update {
+    build_update(sender, -100_123, "supergroup", text)
+}
+
 /// Builds a private-chat text update from `sender`.
 pub fn message_from(sender: i64, text: &str) -> Update {
+    build_update(sender, CHAT_ID, "private", text)
+}
+
+fn build_update(sender: i64, chat_id: i64, chat_type: &str, text: &str) -> Update {
     let entities = if text.starts_with('/') {
         let length = text.split_whitespace().next().map_or(0, str::len);
         format!(r#","entities":[{{"type":"bot_command","offset":0,"length":{length}}}]"#)
@@ -213,9 +222,15 @@ pub fn message_from(sender: i64, text: &str) -> Update {
         String::new()
     };
 
+    let chat = if chat_type == "private" {
+        format!(r#"{{"id":{chat_id},"type":"private","first_name":"T"}}"#)
+    } else {
+        format!(r#"{{"id":{chat_id},"type":"{chat_type}","title":"Ops"}}"#)
+    };
+
     let raw = format!(
         r#"{{"update_id":1,"message":{{"message_id":1,"date":1700000000,
-            "chat":{{"id":{CHAT_ID},"type":"private","first_name":"T"}},
+            "chat":{chat},
             "from":{{"id":{sender},"is_bot":false,"first_name":"T"}},
             "text":{}{entities}}}}}"#,
         serde_json::to_string(text).expect("text json")
