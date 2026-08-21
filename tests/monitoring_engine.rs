@@ -542,3 +542,55 @@ async fn re_enabling_a_rule_clears_its_cooldown_so_the_next_breach_alerts() {
     assert_eq!(scheduler::tick(&h.state).await.unwrap().alerts_sent, 1);
     assert_eq!(AlertEventRepo::new(&h.state.db).count().await.unwrap(), 2);
 }
+
+/// The timer loop itself: that it keeps polling on schedule, records health, and stops
+/// promptly on cancellation rather than waiting out the current interval.
+#[tokio::test]
+async fn the_monitoring_loop_polls_on_schedule_and_stops_on_cancellation() {
+    use chainsentinel::app_state::AppState;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio_util::sync::CancellationToken;
+
+    let db = support::database().await;
+    let shutdown = CancellationToken::new();
+
+    // A real, very short interval. Configuration enforces a 10s floor to protect the
+    // providers, which is bypassed here deliberately: no rules exist, so a poll makes
+    // no outbound requests at all.
+    let mut settings = support::settings(&[]);
+    settings.poll_interval = Duration::from_millis(50);
+
+    let state = AppState::new(
+        db,
+        teloxide::Bot::new(support::BOT_TOKEN),
+        Arc::new(settings),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+        shutdown.clone(),
+    );
+
+    let status = state.status.clone();
+    let loop_handle =
+        tokio::spawn(async move { chainsentinel::engine::scheduler::run(state).await });
+
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    let snapshot = status.snapshot();
+    assert!(
+        snapshot.ticks_completed >= 4,
+        "expected repeated polls, got {}",
+        snapshot.ticks_completed
+    );
+    assert_eq!(snapshot.consecutive_failures, 0);
+    assert!(snapshot.started_at.is_some());
+    assert!(snapshot.last_tick_at.is_some());
+    assert!(snapshot.is_healthy(Duration::from_millis(50)));
+
+    shutdown.cancel();
+
+    tokio::time::timeout(Duration::from_secs(2), loop_handle)
+        .await
+        .expect("monitoring loop did not stop on cancellation")
+        .expect("monitoring loop panicked");
+}
