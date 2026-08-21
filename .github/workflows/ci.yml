@@ -5,8 +5,13 @@ on:
     branches: [main]
   pull_request:
 
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
 jobs:
   check:
+    name: build and test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,8 +28,27 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # `--ignored` tests need network access to third-party APIs and are excluded
+      # deliberately: CI must not fail because CoinGecko is rate-limiting.
       - name: Test
-        run: cargo test
+        run: cargo test --all-targets
 
-      - name: Build
+      - name: Doc tests
+        run: cargo test --doc
+
+      - name: Release build
         run: cargo build --release
+
+      # A migration that only works on an empty database is the failure mode that
+      # cost this project a rewrite, so the chain is applied to a seeded database.
+      - name: Verify migrations against a populated database
+        run: ./scripts/verify-migrations.sh
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

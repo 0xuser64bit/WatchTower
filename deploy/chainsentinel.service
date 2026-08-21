@@ -1,5 +1,6 @@
 [Unit]
-Description=ChainSentinel
+Description=ChainSentinel Solana monitoring daemon
+Documentation=https://github.com/user64bit/chain-sentinel
 After=network-online.target
 Wants=network-online.target
 
@@ -9,10 +10,57 @@ User=chainsentinel
 Group=chainsentinel
 WorkingDirectory=/opt/chainsentinel
 ExecStart=/opt/chainsentinel/chainsentinel
+
+# Contains TELEGRAM_BOT_TOKEN; must be chmod 600 and owned by the service user.
 EnvironmentFile=/opt/chainsentinel/.env
+
+# The daemon logs to stdout as well as to LOG_DIR, so journalctl is authoritative.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=chainsentinel
+
 Restart=always
 RestartSec=5
-LimitNOFILE=65536
+# Give up if it crash-loops, instead of hammering the providers on every restart.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# SIGTERM triggers a graceful drain: stop polling, finish in-flight handlers,
+# checkpoint the write-ahead log, close the pool.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# ── Hardening ─────────────────────────────────────────────────────────────────────
+# The daemon needs outbound HTTPS, its own data and log directories, and nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete
+
+# ProtectSystem=strict makes everything read-only except these.
+ReadWritePaths=/opt/chainsentinel/data /opt/chainsentinel/logs
+
+# ── Resource limits ───────────────────────────────────────────────────────────────
+LimitNOFILE=8192
+MemoryMax=512M
+TasksMax=64
 
 [Install]
 WantedBy=multi-user.target
