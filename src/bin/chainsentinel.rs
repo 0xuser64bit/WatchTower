@@ -1,3 +1,3 @@
-fn main() {
-    chainsentinel::main_impl();
+fn main() -> std::process::ExitCode {
+    chainsentinel::app::main()
 }

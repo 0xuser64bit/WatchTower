@@ -1,15 +1,33 @@
+//! The monitoring loop.
+//!
+//! One tick reads every enabled rule, resolves the current value of each distinct
+//! target, evaluates, and dispatches. Two properties matter most:
+//!
+//! * **Failures are isolated per rule.** The previous implementation propagated the
+//!   first error out of the tick with `?`, so one unreachable mint or one Telegram
+//!   hiccup silently skipped every remaining rule for that interval.
+//! * **Targets are read once per tick, not once per rule.** Values are resolved for
+//!   distinct targets up front, and wallet balances are fetched in a single batched
+//!   RPC call rather than one request per wallet.
+
 use crate::app_state::AppState;
-use crate::db::repos::rules::RuleRepo;
-use crate::rules::evaluate;
-use crate::rules::types::{Operator, RuleKind, RuleOutcome, Sample};
+use crate::db::repos::alert_events::AlertEventRepo;
+use crate::db::repos::rules::{EvaluationOutcome, RuleRepo};
+use crate::engine::status::TickReport;
+use crate::rules::eval::{evaluate, Decision, StateChange};
+use crate::rules::types::{Rule, RuleState, TargetKind};
+use chrono::Utc;
 use std::collections::HashMap;
-use teloxide::types::ChatId;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
+/// How often expired alert history is pruned.
+const PRUNE_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
-pub async fn run(state: AppState, admin_chat_id: ChatId) {
+pub async fn run(state: AppState) {
     let interval = state.settings.poll_interval;
+    state.status.mark_started();
 
     info!(
         interval_secs = interval.as_secs(),
@@ -17,215 +35,292 @@ pub async fn run(state: AppState, admin_chat_id: ChatId) {
     );
 
     let mut ticker = tokio::time::interval(interval);
+    // Falling behind must not queue up a burst of catch-up ticks against
+    // rate-limited providers.
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    let mut last_prune = Instant::now() - PRUNE_EVERY;
 
     loop {
         tokio::select! {
+            biased;
+
             _ = state.shutdown.cancelled() => {
                 info!("monitoring engine received shutdown signal");
                 break;
             }
+
             _ = ticker.tick() => {
-                if let Err(err) = run_tick(&state, admin_chat_id).await {
-                    warn!(%err, "monitoring tick failed");
+                let started = Instant::now();
+
+                match tick(&state).await {
+                    Ok(report) => {
+                        let elapsed = started.elapsed();
+                        state.status.record_tick(report, elapsed);
+                        debug!(
+                            rules = report.rules_evaluated,
+                            alerts = report.alerts_sent,
+                            unavailable = report.targets_unavailable,
+                            duration_ms = elapsed.as_millis(),
+                            "tick complete"
+                        );
+
+                        if elapsed > interval {
+                            warn!(
+                                duration_ms = elapsed.as_millis(),
+                                interval_ms = interval.as_millis(),
+                                "tick took longer than the poll interval; consider raising POLL_INTERVAL_SECONDS"
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        // Only whole-tick failures land here (e.g. the rule list
+                        // could not be read); individual rules are handled inline.
+                        warn!(%err, "monitoring tick failed");
+                        state.status.record_tick_failure(&err);
+                    }
+                }
+
+                if last_prune.elapsed() >= PRUNE_EVERY {
+                    last_prune = Instant::now();
+                    prune_history(&state).await;
                 }
             }
         }
     }
 }
 
-async fn run_tick(state: &AppState, admin_chat_id: ChatId) -> crate::error::Result<()> {
-    let rules = RuleRepo::new(&state.db).list_enabled().await?;
-    debug!(rule_count = rules.len(), "evaluating rules");
+async fn prune_history(state: &AppState) {
+    let days = state.settings.alert_history_retention_days;
 
-    let mut token_cache: HashMap<String, f64> = HashMap::new();
+    match AlertEventRepo::new(&state.db)
+        .prune_older_than_days(days)
+        .await
+    {
+        Ok(0) => {}
+        Ok(removed) => info!(removed, retention_days = days, "pruned alert history"),
+        Err(err) => warn!(%err, "failed to prune alert history"),
+    }
+}
+
+/// Runs a single monitoring cycle.
+///
+/// Public so the whole data plane — value resolution, evaluation, persistence, and
+/// dispatch — can be exercised deterministically by tests instead of only through
+/// the timer loop.
+pub async fn tick(state: &AppState) -> crate::error::Result<TickReport> {
+    let rules = RuleRepo::new(&state.db).list_enabled().await?;
+
+    if rules.is_empty() {
+        return Ok(TickReport::default());
+    }
+
+    let values = resolve_target_values(state, &rules).await;
+
+    let mut report = TickReport {
+        targets_unavailable: values.iter().filter(|(_, v)| v.is_none()).count(),
+        ..TickReport::default()
+    };
 
     for rule in &rules {
-        let sample = match fetch_sample(state, rule, &mut token_cache).await {
-            Ok(Some(sample)) => sample,
-            Ok(None) => continue,
-            Err(err) => {
-                warn!(rule_id = rule.id, %err, "failed to fetch sample");
-                continue;
-            }
+        let key = target_key(rule);
+
+        let Some(Some(observed)) = values.get(&key) else {
+            // The target's value was unavailable this tick. The rule keeps its
+            // existing state, so a firing rule is not wrongly re-armed by a
+            // provider outage.
+            continue;
         };
 
-        if is_percentage_rule(rule) && rule.reference_value.is_none() {
-            RuleRepo::new(&state.db)
-                .initialize_reference_if_missing(rule.id, sample.value)
-                .await?;
-            continue;
-        }
+        report.rules_evaluated += 1;
 
-        let outcome = evaluate(rule, &sample);
-
-        if let RuleOutcome::Trigger { current, threshold } = outcome {
-            state
-                .dispatcher
-                .dispatch(rule, current, threshold, admin_chat_id)
-                .await?;
+        if let Err(err) = process_rule(state, rule, *observed, &mut report).await {
+            warn!(rule_id = rule.id, %err, "failed to process rule");
         }
     }
 
-    Ok(())
+    Ok(report)
 }
 
-async fn fetch_sample(
+/// Evaluates one rule, dispatches if needed, and persists the outcome.
+async fn process_rule(
     state: &AppState,
-    rule: &crate::rules::types::Rule,
-    token_cache: &mut HashMap<String, f64>,
-) -> crate::error::Result<Option<Sample>> {
-    let value = match rule.kind() {
-        RuleKind::Price => {
-            if let Some(cached) = token_cache.get(&rule.target_ref) {
-                *cached
-            } else {
-                let value = state
-                    .price_provider
-                    .get_token_price_usd(&rule.target_ref)
-                    .await?;
-                token_cache.insert(rule.target_ref.clone(), value);
-                value
+    rule: &Rule,
+    observed: f64,
+    report: &mut TickReport,
+) -> crate::error::Result<()> {
+    let now = Utc::now();
+    let decision = evaluate(rule, observed, now);
+
+    if let Decision::Skip { reason } = decision {
+        warn!(rule_id = rule.id, reason, "skipping rule evaluation");
+        return Ok(());
+    }
+
+    let mut triggered_at = None;
+
+    if decision.should_notify() {
+        match state.dispatcher.dispatch(rule, &decision, now).await {
+            Ok(Some(delivery)) => {
+                report.alerts_sent += 1;
+                triggered_at = Some(now);
+                debug!(
+                    rule_id = rule.id,
+                    event_id = delivery.event_id,
+                    "alert recorded"
+                );
+            }
+            Ok(None) => {}
+            Err(err) => {
+                // Leave the rule un-triggered so the next tick retries. Delivery is
+                // therefore at-least-once rather than at-most-once, which is the
+                // right trade-off for an alerting system.
+                warn!(rule_id = rule.id, %err, "failed to dispatch alert; will retry next tick");
+                return Err(err);
             }
         }
-        RuleKind::Balance => {
-            let lamports = state
-                .chain_provider
-                .get_native_balance_lamports(&rule.target_ref)
-                .await?;
-            lamports as f64 / LAMPORTS_PER_SOL
-        }
+    }
+
+    let state_change = match decision.state_change() {
+        StateChange::ToFiring if rule.state != RuleState::Firing => Some(RuleState::Firing),
+        StateChange::ToOk if rule.state != RuleState::Ok => Some(RuleState::Ok),
+        _ => None,
     };
 
-    Ok(Some(Sample {
-        value,
-        reference: rule.reference_value,
-    }))
+    let reference_value = match decision {
+        // First observation: establish the baseline.
+        Decision::BaselineSet { reference } => Some(reference),
+        // A percentage rule that just fired re-baselines to the current value, so it
+        // measures the *next* move rather than staying anchored to a stale reference
+        // and re-firing forever.
+        Decision::Notify { observed, .. } if rule.operator.is_percentage() => Some(observed),
+        _ => None,
+    };
+
+    RuleRepo::new(&state.db)
+        .record_evaluation(
+            rule.id,
+            EvaluationOutcome {
+                observed,
+                evaluated_at: now,
+                state: state_change,
+                reference_value,
+                triggered_at,
+            },
+        )
+        .await
 }
 
-fn is_percentage_rule(rule: &crate::rules::types::Rule) -> bool {
-    matches!(
-        rule.operator(),
-        Operator::PctChangeUp | Operator::PctChangeDown
-    )
+/// Identifies a distinct thing to read, so two rules on the same target share a read.
+fn target_key(rule: &Rule) -> (TargetKind, i64) {
+    (rule.target.kind, rule.target.id)
+}
+
+/// Reads the current value of every distinct target referenced by `rules`.
+async fn resolve_target_values(
+    state: &AppState,
+    rules: &[Rule],
+) -> HashMap<(TargetKind, i64), Option<f64>> {
+    let mut values = HashMap::new();
+
+    let mut mints: Vec<(i64, String)> = Vec::new();
+    let mut wallets: Vec<(i64, String)> = Vec::new();
+
+    for rule in rules {
+        let key = target_key(rule);
+        if values.contains_key(&key) {
+            continue;
+        }
+        values.insert(key, None);
+
+        match rule.target.kind {
+            TargetKind::Token => mints.push((rule.target.id, rule.target.reference.clone())),
+            TargetKind::Wallet => wallets.push((rule.target.id, rule.target.reference.clone())),
+        }
+    }
+
+    // Prices: one request per mint, since CoinGecko's public tier rejects batches.
+    let mut price_ok = 0usize;
+    for (token_id, mint) in &mints {
+        match state.price_provider.get_token_price_usd(mint).await {
+            Ok(price) => {
+                price_ok += 1;
+                values.insert((TargetKind::Token, *token_id), Some(price));
+            }
+            Err(err) => warn!(mint = %mint, %err, "failed to read token price"),
+        }
+    }
+
+    if !mints.is_empty() {
+        state.status.set_price_provider_healthy(price_ok > 0);
+    }
+
+    // Balances: a single batched call covers up to 100 wallets.
+    if !wallets.is_empty() {
+        let addresses: Vec<String> = wallets.iter().map(|(_, a)| a.clone()).collect();
+
+        match state
+            .chain_provider
+            .get_native_balances_lamports(&addresses)
+            .await
+        {
+            Ok(balances) => {
+                state.status.set_chain_provider_healthy(true);
+                for ((wallet_id, _), lamports) in wallets.iter().zip(balances) {
+                    values.insert(
+                        (TargetKind::Wallet, *wallet_id),
+                        Some(lamports as f64 / LAMPORTS_PER_SOL),
+                    );
+                }
+            }
+            Err(err) => {
+                state.status.set_chain_provider_healthy(false);
+                warn!(wallets = wallets.len(), %err, "failed to read wallet balances");
+            }
+        }
+    }
+
+    values
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app_state::AppState;
-    use crate::config::Settings;
-    use crate::db::Db;
-    use crate::providers::{ChainProvider, PriceProvider, ProviderResult};
-    use async_trait::async_trait;
-    use std::sync::Arc;
-    use teloxide::Bot;
-    use tokio_util::sync::CancellationToken;
+    use crate::rules::types::RuleTarget;
 
-    struct MockPrice {
-        token: f64,
-    }
-
-    #[async_trait]
-    impl PriceProvider for MockPrice {
-        async fn get_native_price_usd(&self) -> ProviderResult<f64> {
-            Ok(self.token)
-        }
-
-        async fn get_token_price_usd(&self, _mint: &str) -> ProviderResult<f64> {
-            Ok(self.token)
-        }
-    }
-
-    struct MockChain {
-        lamports: u64,
-    }
-
-    #[async_trait]
-    impl ChainProvider for MockChain {
-        async fn get_native_balance_lamports(&self, _address: &str) -> ProviderResult<u64> {
-            Ok(self.lamports)
-        }
-    }
-
-    fn settings() -> Arc<Settings> {
-        Arc::new(
-            Settings::from_env_map(&std::collections::HashMap::from([
-                (
-                    "TELEGRAM_BOT_TOKEN".to_string(),
-                    "1234567890:test-token".to_string(),
-                ),
-                ("ADMIN_TELEGRAM_IDS".to_string(), "1".to_string()),
-                ("DATABASE_URL".to_string(), "sqlite::memory:".to_string()),
-            ]))
-            .expect("valid test settings"),
-        )
-    }
-
-    fn state(db: Arc<Db>, price: f64, lamports: u64) -> AppState {
-        let bot = Bot::new("test");
-        AppState::new(
-            db.clone(),
-            bot,
-            settings(),
-            Arc::new(MockPrice { token: price }),
-            Arc::new(MockChain { lamports }),
-            CancellationToken::new(),
-        )
-    }
-
-    fn rule(operator: &str, kind: &str, target_type: &str) -> crate::rules::types::Rule {
-        use chrono::Utc;
-        crate::rules::types::Rule {
-            id: 1,
-            kind: kind.into(),
-            target_type: target_type.into(),
-            target_ref: "addr".into(),
-            metric: if kind == "price" { "price" } else { "balance" }.into(),
-            operator: operator.into(),
-            threshold: 10.0,
-            time_window_seconds: None,
-            cooldown_seconds: 300,
-            max_triggers: None,
+    fn rule(id: i64, kind: TargetKind, target_id: i64) -> Rule {
+        Rule {
+            id,
+            target: RuleTarget {
+                kind,
+                id: target_id,
+                reference: format!("target-{target_id}"),
+                label: None,
+            },
+            operator: crate::rules::types::Operator::Gt,
+            threshold: 1.0,
+            cooldown_seconds: 0,
             reference_value: None,
-            enabled: 1,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            deleted_at: None,
+            state: RuleState::Ok,
+            enabled: true,
+            last_value: None,
+            last_evaluated_at: None,
+            last_triggered_at: None,
         }
     }
 
-    #[tokio::test]
-    async fn fetch_sample_returns_sol_for_balance() {
-        let db = Arc::new(Db::connect_in_memory().await.unwrap());
-        db.migrate().await.unwrap();
-        let state = state(db, 2.0, 2_500_000_000);
-        let rule = rule(">", "balance", "wallet");
+    #[test]
+    fn rules_on_the_same_target_share_one_read() {
+        let rules = [
+            rule(1, TargetKind::Token, 10),
+            rule(2, TargetKind::Token, 10),
+            rule(3, TargetKind::Wallet, 10),
+        ];
 
-        let sample = fetch_sample(&state, &rule, &mut HashMap::new())
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(sample.value, 2.5);
-    }
+        let keys: std::collections::HashSet<_> = rules.iter().map(target_key).collect();
 
-    #[tokio::test]
-    async fn fetch_sample_caches_token_prices() {
-        let db = Arc::new(Db::connect_in_memory().await.unwrap());
-        db.migrate().await.unwrap();
-        let state = state(db, 4.0, 0);
-        let rule = rule(">", "price", "token");
-        let mut cache = HashMap::new();
-
-        let first = fetch_sample(&state, &rule, &mut cache)
-            .await
-            .unwrap()
-            .unwrap();
-        let second = fetch_sample(&state, &rule, &mut cache)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(first.value, 4.0);
-        assert_eq!(second.value, 4.0);
+        // Same token twice collapses to one read; the wallet with the same numeric id
+        // is a different target and must not collide.
+        assert_eq!(keys.len(), 2);
     }
 }

@@ -1,11 +1,18 @@
 use crate::alerts::dispatcher::AlertDispatcher;
 use crate::config::Settings;
 use crate::db::Db;
+use crate::engine::EngineStatus;
 use crate::providers::{ChainProvider, PriceProvider};
 use std::sync::Arc;
-use teloxide::prelude::*;
+use teloxide::Bot;
 use tokio_util::sync::CancellationToken;
 
+/// Everything long-lived, shared by the control plane (Telegram) and the data plane
+/// (the monitoring engine).
+///
+/// The Telegram layer previously received only `Arc<Db>`, which is why the configured
+/// alert cooldown was ignored (the flow hardcoded 300s) and why new rules could not be
+/// validated against a provider before being saved.
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Db>,
@@ -14,6 +21,7 @@ pub struct AppState {
     pub price_provider: Arc<dyn PriceProvider>,
     pub chain_provider: Arc<dyn ChainProvider>,
     pub dispatcher: Arc<AlertDispatcher>,
+    pub status: EngineStatus,
     pub shutdown: CancellationToken,
 }
 
@@ -35,6 +43,7 @@ impl AppState {
             price_provider,
             chain_provider,
             dispatcher,
+            status: EngineStatus::new(),
             shutdown,
         }
     }

@@ -1,117 +1,196 @@
+//! Guided token tracking.
+//!
+//! The mint is verified against the price provider before the token is stored. A
+//! token with no USD listing can never satisfy a price rule, so accepting it would
+//! let the user build an alert that silently never fires.
+
+use crate::app_state::AppState;
 use crate::db::repos::tokens::TokenRepo;
-use crate::db::Db;
-use std::sync::Arc;
-use teloxide::dispatching::dialogue::{Dialogue, InMemStorage};
+use crate::providers::solana::is_valid_address;
+use crate::providers::ProviderError;
+use crate::telegram::flows::{optional_answer, reprompt, text_of, FlowDialogue, HandlerResult};
+use crate::telegram::reply;
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
-pub type FlowDialogue = Dialogue<AddTokenState, InMemStorage<AddTokenState>>;
-type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
-
-#[derive(Clone, Default)]
-pub enum AddTokenState {
-    #[default]
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
     AwaitingMint,
     AwaitingSymbol {
         mint: String,
+        price: Option<f64>,
     },
-    Confirm {
+    Confirming {
         mint: String,
         symbol: Option<String>,
     },
 }
 
-pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
+pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
     use dptree::case;
 
-    Update::filter_message()
-        .branch(case![AddTokenState::AwaitingMint].endpoint(await_mint))
-        .branch(case![AddTokenState::AwaitingSymbol { mint }].endpoint(await_symbol))
-        .branch(case![AddTokenState::Confirm { mint, symbol }].endpoint(confirm))
+    dptree::entry()
+        .branch(case![Step::AwaitingMint].endpoint(await_mint))
+        .branch(case![Step::AwaitingSymbol { mint, price }].endpoint(await_symbol))
+        .branch(case![Step::Confirming { mint, symbol }].endpoint(confirm))
 }
 
-async fn await_mint(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let Some(text) = msg.text().map(|s| s.trim().to_string()) else {
-        bot.send_message(msg.chat.id, "Please send a valid Solana mint address.")
-            .await?;
-        return Ok(());
-    };
-
-    if !crate::providers::solana::validation::is_valid_base58_address(&text) {
-        bot.send_message(
-            msg.chat.id,
-            "That does not look like a valid Solana mint address.",
-        )
-        .await?;
+pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
+    if reply::require_user(&state.bot, &state.db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
-    bot.send_message(
+    reply::send_text(
+        &state.bot,
         msg.chat.id,
-        "Mint received. Optional symbol? Send `-` to skip.",
+        "Send the SPL token mint address you want to track.\n\nSend /cancel to stop.",
+    )
+    .await?;
+
+    dialogue.update(Step::AwaitingMint).await?;
+    Ok(())
+}
+
+async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
+    let Some(mint) = text_of(&msg) else {
+        return reprompt(&state, &msg, "Send the mint address as text.").await;
+    };
+
+    if !is_valid_address(mint) {
+        return reprompt(
+            &state,
+            &msg,
+            "That is not a valid Solana address. A mint address is 32-44 base58 characters.",
+        )
+        .await;
+    }
+
+    let mint = mint.to_string();
+
+    if let Some(existing) = TokenRepo::new(&state.db).find_by_mint(&mint).await? {
+        reply::send_text(
+            &state.bot,
+            msg.chat.id,
+            format!(
+                "Already tracked as token {} ({}). Use /alerts to add a rule for it.",
+                existing.id,
+                existing.symbol.as_deref().unwrap_or("no symbol")
+            ),
+        )
+        .await?;
+        super::reset(&dialogue).await;
+        return Ok(());
+    }
+
+    // Confirm the provider can actually price this mint.
+    let price = match state.price_provider.get_token_price_usd(&mint).await {
+        Ok(price) => Some(price),
+        Err(ProviderError::Unsupported(_)) => {
+            reply::send_text(
+                &state.bot,
+                msg.chat.id,
+                "The price provider has no USD listing for that mint, so a price \
+                 alert could never fire. Not adding it.",
+            )
+            .await?;
+            super::reset(&dialogue).await;
+            return Ok(());
+        }
+        Err(err) => {
+            // A transient outage must not block tracking a legitimate token.
+            tracing::warn!(%mint, %err, "could not verify token price while adding");
+            None
+        }
+    };
+
+    let intro = match price {
+        Some(price) => format!(
+            "Current price: {} USD.",
+            crate::alerts::format::amount(price)
+        ),
+        None => "Could not reach the price provider to verify it right now.".to_string(),
+    };
+
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!("{intro}\n\nSend a symbol to label it (for example USDC), or `-` to skip."),
     )
     .await?;
 
     dialogue
-        .update(AddTokenState::AwaitingSymbol { mint: text })
+        .update(Step::AwaitingSymbol { mint, price })
         .await?;
     Ok(())
 }
 
 async fn await_symbol(
-    bot: Bot,
+    state: AppState,
     dialogue: FlowDialogue,
     msg: Message,
-    mint: String,
+    (mint, _price): (String, Option<f64>),
 ) -> HandlerResult {
-    let text = msg.text().map(|s| s.trim().to_string());
-    let symbol = if text.as_deref() == Some("-") {
-        None
-    } else {
-        text
+    let Some(raw) = text_of(&msg) else {
+        return reprompt(&state, &msg, "Send a symbol as text, or `-` to skip.").await;
     };
 
-    let symbol_display = symbol.as_deref().unwrap_or("(no symbol)");
-    bot.send_message(
+    let symbol = optional_answer(raw);
+
+    if let Some(symbol) = &symbol {
+        if symbol.chars().count() > 32 {
+            return reprompt(&state, &msg, "Keep the symbol to 32 characters or fewer.").await;
+        }
+    }
+
+    reply::send_text(
+        &state.bot,
         msg.chat.id,
-        format!("Add token?\nMint: {mint}\nSymbol: {symbol_display}\n\nReply `confirm` to create or `cancel` to abort."),
+        format!(
+            "Track this token?\n\nMint: {mint}\nSymbol: {}\n\nReply `yes` to confirm, or /cancel.",
+            symbol.as_deref().unwrap_or("(none)")
+        ),
     )
     .await?;
 
-    dialogue
-        .update(AddTokenState::Confirm { mint, symbol })
-        .await?;
+    dialogue.update(Step::Confirming { mint, symbol }).await?;
     Ok(())
 }
 
 async fn confirm(
-    bot: Bot,
+    state: AppState,
     dialogue: FlowDialogue,
-    db: Arc<Db>,
     msg: Message,
-    mint: String,
-    symbol: Option<String>,
+    (mint, symbol): (String, Option<String>),
 ) -> HandlerResult {
-    if msg.text().map(|s| s.trim().to_lowercase()) != Some("confirm".to_string()) {
-        bot.send_message(msg.chat.id, "Cancelled.").await?;
-        dialogue.exit().await?;
-        return Ok(());
+    if !super::is_affirmative(text_of(&msg)) {
+        super::reset(&dialogue).await;
+        return reprompt(&state, &msg, "Cancelled. Nothing was added.").await;
     }
 
-    match TokenRepo::new(&db)
-        .create(&mint, symbol.as_deref(), None)
+    match TokenRepo::new(&state.db)
+        .create(&mint, symbol.as_deref())
         .await
     {
-        Ok(_) => {
-            bot.send_message(msg.chat.id, "Token added successfully.")
-                .await?;
+        Ok(token) => {
+            reply::send_text(
+                &state.bot,
+                msg.chat.id,
+                format!(
+                    "Tracking token {} — {}.\n\nUse /addalert to create a price alert for it.",
+                    token.id,
+                    token.display()
+                ),
+            )
+            .await?;
         }
-        Err(_) => {
-            bot.send_message(msg.chat.id, "Failed to add token.")
-                .await?;
+        Err(err) => {
+            reply::report_error(&state.bot, msg.chat.id, "add_token", &err).await;
         }
     }
 
-    dialogue.exit().await?;
+    super::reset(&dialogue).await;
     Ok(())
 }

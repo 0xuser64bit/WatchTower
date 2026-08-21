@@ -1,112 +1,180 @@
+//! Guided wallet tracking.
+//!
+//! The address is checked on chain before the wallet is stored, so the user sees the
+//! real balance and immediately notices a mistyped address.
+
+use crate::app_state::AppState;
 use crate::db::repos::wallets::WalletRepo;
-use crate::db::Db;
-use std::sync::Arc;
-use teloxide::dispatching::dialogue::{Dialogue, InMemStorage};
+use crate::providers::solana::is_valid_address;
+use crate::telegram::flows::{
+    is_affirmative, optional_answer, reprompt, text_of, FlowDialogue, HandlerResult,
+};
+use crate::telegram::reply;
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
-pub type FlowDialogue = Dialogue<AddWalletState, InMemStorage<AddWalletState>>;
-type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
 
-#[derive(Clone, Default)]
-pub enum AddWalletState {
-    #[default]
+#[derive(Clone, Debug, PartialEq)]
+pub enum Step {
     AwaitingAddress,
     AwaitingLabel {
         address: String,
     },
-    Confirm {
+    Confirming {
         address: String,
         label: Option<String>,
     },
 }
 
-pub fn message_handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
+pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
     use dptree::case;
 
-    Update::filter_message()
-        .branch(case![AddWalletState::AwaitingAddress].endpoint(await_address))
-        .branch(case![AddWalletState::AwaitingLabel { address }].endpoint(await_label))
-        .branch(case![AddWalletState::Confirm { address, label }].endpoint(confirm))
+    dptree::entry()
+        .branch(case![Step::AwaitingAddress].endpoint(await_address))
+        .branch(case![Step::AwaitingLabel { address }].endpoint(await_label))
+        .branch(case![Step::Confirming { address, label }].endpoint(confirm))
 }
 
-async fn await_address(bot: Bot, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
-    let Some(address) = msg.text().map(|s| s.trim().to_string()) else {
-        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.")
-            .await?;
-        return Ok(());
-    };
-
-    if !crate::providers::solana::validation::is_valid_base58_address(&address) {
-        bot.send_message(msg.chat.id, "Please send a valid Solana wallet address.")
-            .await?;
+pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
+    if reply::require_user(&state.bot, &state.db, &msg)
+        .await
+        .is_none()
+    {
         return Ok(());
     }
 
-    bot.send_message(msg.chat.id, "Optional label? Send `-` to skip.")
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        "Send the Solana wallet address you want to track.\n\nSend /cancel to stop.",
+    )
+    .await?;
+
+    dialogue.update(Step::AwaitingAddress).await?;
+    Ok(())
+}
+
+async fn await_address(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
+    let Some(address) = text_of(&msg) else {
+        return reprompt(&state, &msg, "Send the wallet address as text.").await;
+    };
+
+    if !is_valid_address(address) {
+        return reprompt(
+            &state,
+            &msg,
+            "That is not a valid Solana address. Addresses are 32-44 base58 characters.",
+        )
+        .await;
+    }
+
+    let address = address.to_string();
+
+    if let Some(existing) = WalletRepo::new(&state.db).find_by_address(&address).await? {
+        reply::send_text(
+            &state.bot,
+            msg.chat.id,
+            format!(
+                "Already tracked as wallet {} ({}).",
+                existing.id,
+                existing.label.as_deref().unwrap_or("no label")
+            ),
+        )
         .await?;
-    dialogue
-        .update(AddWalletState::AwaitingLabel { address })
-        .await?;
+        super::reset(&dialogue).await;
+        return Ok(());
+    }
+
+    let balance = state
+        .chain_provider
+        .get_native_balance_lamports(&address)
+        .await;
+
+    let intro = match balance {
+        Ok(lamports) => format!(
+            "Current balance: {} SOL.",
+            crate::alerts::format::amount(lamports as f64 / LAMPORTS_PER_SOL)
+        ),
+        Err(err) => {
+            tracing::warn!(%address, %err, "could not read wallet balance while adding");
+            "Could not reach a Solana RPC endpoint to verify it right now.".to_string()
+        }
+    };
+
+    reply::send_text(
+        &state.bot,
+        msg.chat.id,
+        format!("{intro}\n\nSend a label for this wallet, or `-` to skip."),
+    )
+    .await?;
+
+    dialogue.update(Step::AwaitingLabel { address }).await?;
     Ok(())
 }
 
 async fn await_label(
-    bot: Bot,
+    state: AppState,
     dialogue: FlowDialogue,
     msg: Message,
     address: String,
 ) -> HandlerResult {
-    let label = msg.text().map(|s| s.trim().to_string());
-    let label = if label.as_deref() == Some("-") {
-        None
-    } else {
-        label
+    let Some(raw) = text_of(&msg) else {
+        return reprompt(&state, &msg, "Send a label as text, or `-` to skip.").await;
     };
 
-    let label_display = label.as_deref().unwrap_or("(no label)");
-    bot.send_message(
+    let label = optional_answer(raw);
+
+    if let Some(label) = &label {
+        if label.chars().count() > 64 {
+            return reprompt(&state, &msg, "Keep the label to 64 characters or fewer.").await;
+        }
+    }
+
+    reply::send_text(
+        &state.bot,
         msg.chat.id,
-        format!("Add wallet?\nAddress: {address}\nLabel: {label_display}\n\nReply `confirm` to create or `cancel` to abort."),
+        format!(
+            "Track this wallet?\n\nAddress: {address}\nLabel: {}\n\nReply `yes` to confirm, or /cancel.",
+            label.as_deref().unwrap_or("(none)")
+        ),
     )
     .await?;
 
-    dialogue
-        .update(AddWalletState::Confirm { address, label })
-        .await?;
+    dialogue.update(Step::Confirming { address, label }).await?;
     Ok(())
 }
 
 async fn confirm(
-    bot: Bot,
+    state: AppState,
     dialogue: FlowDialogue,
-    db: Arc<Db>,
     msg: Message,
-    address: String,
-    label: Option<String>,
+    (address, label): (String, Option<String>),
 ) -> HandlerResult {
-    let reply = msg.text().map(|s| s.trim().to_lowercase());
-
-    if reply != Some("confirm".to_string()) {
-        bot.send_message(msg.chat.id, "Cancelled.").await?;
-        dialogue.exit().await?;
-        return Ok(());
+    if !is_affirmative(text_of(&msg)) {
+        super::reset(&dialogue).await;
+        return reprompt(&state, &msg, "Cancelled. Nothing was added.").await;
     }
 
-    match WalletRepo::new(&db)
+    match WalletRepo::new(&state.db)
         .create(&address, label.as_deref())
         .await
     {
-        Ok(_) => {
-            bot.send_message(msg.chat.id, "Wallet added successfully.")
-                .await?;
+        Ok(wallet) => {
+            reply::send_text(
+                &state.bot,
+                msg.chat.id,
+                format!(
+                    "Tracking wallet {} — {}.\n\nUse /addalert to create a balance alert for it.",
+                    wallet.id,
+                    wallet.display()
+                ),
+            )
+            .await?;
         }
-        Err(_) => {
-            bot.send_message(msg.chat.id, "Failed to add wallet.")
-                .await?;
-        }
+        Err(err) => reply::report_error(&state.bot, msg.chat.id, "add_wallet", &err).await,
     }
 
-    dialogue.exit().await?;
+    super::reset(&dialogue).await;
     Ok(())
 }

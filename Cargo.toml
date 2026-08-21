@@ -13,7 +13,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "chrono", "migrate", "macros"] }
 tracing = "0.1"
 tracing-appender = "0.2"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +25,9 @@ sha2 = "0.10"
 
 [dev-dependencies]
 mockito = "1"
+regex = "1.13.1"
+# `start_paused` lets retry/backoff tests run instantly instead of really sleeping.
+tokio = { version = "1", features = ["test-util"] }
 
 [profile.release]
 lto = "thin"

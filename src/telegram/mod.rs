@@ -1,167 +1,172 @@
+//! The Telegram control plane.
+
 pub mod auth;
 pub mod commands;
 pub mod flows;
 pub mod reply;
 
-use crate::db::Db;
-use std::sync::Arc;
+use crate::app_state::AppState;
+use flows::{DialogueState, FlowDialogue};
 use teloxide::dispatching::{dialogue, dialogue::InMemStorage, UpdateHandler};
 use teloxide::prelude::*;
 use teloxide::utils::command::BotCommands;
-use tokio_util::sync::CancellationToken;
 
-#[derive(BotCommands, Clone)]
-#[command(rename_rule = "lowercase", description = "Available commands:")]
+type HandlerError = Box<dyn std::error::Error + Send + Sync>;
+
+/// Every argument is taken as `String` and parsed by the handler.
+///
+/// Two commands previously used teloxide's typed `i64` parsing, which meant
+/// `/enablerule abc` did not match the branch at all and fell through to the generic
+/// "use /help" fallback instead of reporting a bad id.
+#[derive(BotCommands, Clone, Debug, PartialEq)]
+#[command(rename_rule = "lowercase", description = "ChainSentinel commands")]
 pub enum Command {
-    #[command(description = "show the main menu")]
+    #[command(description = "show the welcome message and command list")]
     Start,
-    #[command(description = "show help")]
+    #[command(description = "list commands")]
     Help,
-    #[command(description = "add a token to track")]
+    #[command(description = "engine and provider health")]
+    Status,
+    #[command(description = "abandon the current step")]
+    Cancel,
+
+    #[command(description = "track a token")]
     Addtoken,
     #[command(description = "list tracked tokens")]
     Tokens,
-    #[command(description = "delete a tracked token")]
+    #[command(description = "stop tracking a token")]
     Deletetoken(String),
-    #[command(description = "add a wallet to track")]
+
+    #[command(description = "track a wallet")]
     Addwallet,
     #[command(description = "list tracked wallets")]
     Wallets,
-    #[command(description = "delete a tracked wallet")]
+    #[command(description = "stop tracking a wallet")]
     Deletewallet(String),
-    #[command(description = "add an alert rule")]
+
+    #[command(description = "create an alert rule")]
     Addalert,
     #[command(description = "list alert rules")]
     Alerts,
     #[command(description = "enable an alert rule")]
-    Enablerule(i64),
+    Enablerule(String),
     #[command(description = "disable an alert rule")]
-    Disablerule(i64),
+    Disablerule(String),
     #[command(description = "delete an alert rule")]
     Deleterule(String),
-    #[command(description = "show recent alerts")]
+    #[command(description = "recent alerts")]
     History,
-    #[command(description = "open the admin panel")]
+
+    #[command(description = "admin panel")]
     Admin,
-    #[command(description = "list authorized users")]
+    #[command(description = "list users")]
     Listusers,
     #[command(description = "grant admin")]
     Addadmin(String),
     #[command(description = "revoke admin")]
     Demote(String),
-    #[command(description = "block user")]
+    #[command(description = "block a user")]
     Block(String),
-    #[command(description = "unblock user")]
+    #[command(description = "unblock a user")]
     Unblock(String),
 }
 
-pub fn schema() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
+pub fn schema() -> UpdateHandler<HandlerError> {
     use dptree::case;
 
     let command_handler = teloxide::filter_command::<Command, _>()
-        .branch(case![Command::Start].endpoint(commands::start::start))
-        .branch(case![Command::Help].endpoint(commands::start::help))
-        .branch(case![Command::Addtoken].endpoint(commands::tokens::start_add_token))
-        .branch(case![Command::Tokens].endpoint(commands::tokens::list_tokens))
-        .branch(case![Command::Deletetoken(id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
-                commands::tokens::delete_token(bot, db, msg, id).await
+        // A command always wins over an in-progress flow, and clears it first, so a
+        // user can never be trapped in a dialogue and a stray flow step can never
+        // consume the argument of an unrelated command.
+        .chain(dptree::filter_map_async(
+            |dialogue: FlowDialogue, current: DialogueState| async move {
+                if current != DialogueState::Idle {
+                    flows::reset(&dialogue).await;
+                }
+                Some(())
             },
         ))
-        .branch(case![Command::Addwallet].endpoint(commands::wallets::start_add_wallet))
-        .branch(case![Command::Wallets].endpoint(commands::wallets::list_wallets))
-        .branch(case![Command::Deletewallet(id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
-                commands::wallets::delete_wallet(bot, db, msg, id).await
+        .branch(case![Command::Start].endpoint(commands::start))
+        .branch(case![Command::Help].endpoint(commands::help))
+        .branch(case![Command::Status].endpoint(commands::status::status))
+        .branch(case![Command::Cancel].endpoint(flows::cancel))
+        .branch(case![Command::Addtoken].endpoint(flows::add_token::start))
+        .branch(case![Command::Tokens].endpoint(commands::targets::list_tokens))
+        .branch(case![Command::Deletetoken(args)].endpoint(commands::targets::delete_token))
+        .branch(case![Command::Addwallet].endpoint(flows::add_wallet::start))
+        .branch(case![Command::Wallets].endpoint(commands::targets::list_wallets))
+        .branch(case![Command::Deletewallet(args)].endpoint(commands::targets::delete_wallet))
+        .branch(case![Command::Addalert].endpoint(flows::add_alert::start))
+        .branch(case![Command::Alerts].endpoint(commands::alerts::list_rules))
+        .branch(case![Command::Enablerule(args)].endpoint(
+            |state: AppState, msg: Message, args: String| async move {
+                commands::alerts::set_enabled(state, msg, args, true).await
             },
         ))
-        .branch(case![Command::Addalert].endpoint(commands::start_add_alert))
-        .branch(case![Command::Alerts].endpoint(commands::alerts::list_alerts))
-        .branch(case![Command::Enablerule(id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, id: i64| async move {
-                commands::alerts::set_rule_enabled(bot, db, msg, id, true).await
+        .branch(case![Command::Disablerule(args)].endpoint(
+            |state: AppState, msg: Message, args: String| async move {
+                commands::alerts::set_enabled(state, msg, args, false).await
             },
         ))
-        .branch(case![Command::Disablerule(id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, id: i64| async move {
-                commands::alerts::set_rule_enabled(bot, db, msg, id, false).await
-            },
-        ))
-        .branch(case![Command::Deleterule(id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, id: String| async move {
-                commands::alerts::delete_rule(bot, db, msg, id).await
-            },
-        ))
-        .branch(case![Command::History].endpoint(commands::alerts::show_history))
-        .branch(case![Command::Admin].endpoint(commands::admin::admin_menu))
+        .branch(case![Command::Deleterule(args)].endpoint(commands::alerts::delete_rule))
+        .branch(case![Command::History].endpoint(commands::alerts::history))
+        .branch(case![Command::Admin].endpoint(commands::admin::panel))
         .branch(case![Command::Listusers].endpoint(commands::admin::list_users))
-        .branch(case![Command::Addadmin(telegram_id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
-                commands::admin::add_admin(bot, db, msg, telegram_id).await
+        .branch(case![Command::Addadmin(args)].endpoint(commands::admin::add_admin))
+        .branch(case![Command::Demote(args)].endpoint(commands::admin::demote))
+        .branch(case![Command::Block(args)].endpoint(
+            |state: AppState, msg: Message, args: String| async move {
+                commands::admin::set_blocked(state, msg, args, true).await
             },
         ))
-        .branch(case![Command::Demote(telegram_id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
-                commands::admin::demote_user(bot, db, msg, telegram_id).await
-            },
-        ))
-        .branch(case![Command::Block(telegram_id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
-                commands::admin::block_user(bot, db, msg, telegram_id).await
-            },
-        ))
-        .branch(case![Command::Unblock(telegram_id)].endpoint(
-            |bot: Bot, db: Arc<Db>, msg: Message, telegram_id: String| async move {
-                commands::admin::unblock_user(bot, db, msg, telegram_id).await
+        .branch(case![Command::Unblock(args)].endpoint(
+            |state: AppState, msg: Message, args: String| async move {
+                commands::admin::set_blocked(state, msg, args, false).await
             },
         ));
 
+    // Order is load-bearing: commands, then active flow steps, then the catch-all.
     let message_handler = Update::filter_message()
         .branch(command_handler)
+        .branch(flows::handler())
         .branch(dptree::endpoint(commands::fallback));
 
-    dialogue::enter::<
-        Update,
-        InMemStorage<flows::add_token::AddTokenState>,
-        flows::add_token::AddTokenState,
-        _,
-    >()
-    .branch(flows::add_token::message_handler())
-    .branch(
-        dialogue::enter::<
-            Update,
-            InMemStorage<flows::add_alert::AddAlertState>,
-            flows::add_alert::AddAlertState,
-            _,
-        >()
-        .branch(flows::add_alert::message_handler()),
-    )
-    .branch(
-        dialogue::enter::<
-            Update,
-            InMemStorage<flows::add_wallet::AddWalletState>,
-            flows::add_wallet::AddWalletState,
-            _,
-        >()
-        .branch(flows::add_wallet::message_handler()),
-    )
-    .branch(message_handler)
+    dialogue::enter::<Update, InMemStorage<DialogueState>, DialogueState, _>()
+        .branch(message_handler)
 }
 
-pub async fn run(bot: Bot, db: Arc<Db>, shutdown: CancellationToken) {
-    let mut dispatcher = Dispatcher::builder(bot, schema())
-        .dependencies(dptree::deps![
-            db,
-            InMemStorage::<flows::add_token::AddTokenState>::new(),
-            InMemStorage::<flows::add_alert::AddAlertState>::new(),
-            InMemStorage::<flows::add_wallet::AddWalletState>::new()
-        ])
+pub async fn run(state: AppState) {
+    let state_shutdown = state.shutdown.clone();
+
+    let mut dispatcher = Dispatcher::builder(state.bot.clone(), schema())
+        .dependencies(dptree::deps![state, InMemStorage::<DialogueState>::new()])
+        .default_handler(|update| async move {
+            // Non-message updates (edits, callbacks, channel posts). Expected, but
+            // recorded at debug so an unexpected flood is diagnosable.
+            tracing::debug!(update_id = update.id, "unhandled update kind");
+        })
+        // Endpoint errors are reported to the user by the handlers themselves; this
+        // is the last resort for anything that escaped, and it must never be silent.
+        .error_handler(std::sync::Arc::new(|err| async move {
+            tracing::error!(error = %err, "unhandled error in telegram handler");
+        }))
         .build();
 
-    tokio::select! {
-        _ = shutdown.cancelled() => {
-            tracing::info!("telegram dispatcher received shutdown signal");
+    let dispatcher_shutdown = dispatcher.shutdown_token();
+    let shutdown = state_shutdown;
+
+    // Ask the dispatcher to stop accepting updates and drain in-flight handlers,
+    // rather than dropping it mid-request as the previous `select!` did.
+    let waiter = tokio::spawn(async move {
+        shutdown.cancelled().await;
+        tracing::info!("telegram dispatcher shutting down");
+        if let Err(err) = dispatcher_shutdown.shutdown() {
+            tracing::debug!(%err, "dispatcher was not running");
         }
-        _ = dispatcher.dispatch() => {}
-    }
+    });
+
+    dispatcher.dispatch().await;
+    waiter.abort();
+
+    tracing::info!("telegram dispatcher stopped");
 }
