@@ -6,14 +6,14 @@
 
 mod support;
 
-use chainsentinel::db::repos::alert_events::AlertEventRepo;
-use chainsentinel::db::repos::rules::{NewRuleTarget, RuleRepo};
-use chainsentinel::db::repos::tokens::TokenRepo;
-use chainsentinel::db::repos::wallets::WalletRepo;
-use chainsentinel::engine::scheduler;
-use chainsentinel::rules::types::{Operator, RuleState};
 use mockito::Matcher;
 use std::sync::Arc;
+use watchtower::db::repos::alert_events::AlertEventRepo;
+use watchtower::db::repos::rules::{NewRuleTarget, RuleRepo};
+use watchtower::db::repos::tokens::TokenRepo;
+use watchtower::db::repos::wallets::WalletRepo;
+use watchtower::engine::scheduler;
+use watchtower::rules::types::{Operator, RuleState};
 
 const MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const WALLET: &str = "So11111111111111111111111111111111111111112";
@@ -21,7 +21,7 @@ const LAMPORTS_PER_SOL: u64 = 1_000_000_000;
 
 struct Harness {
     server: mockito::ServerGuard,
-    state: chainsentinel::app_state::AppState,
+    state: watchtower::app_state::AppState,
     price: Arc<support::FakePriceProvider>,
     chain: Arc<support::FakeChainProvider>,
 }
@@ -283,7 +283,7 @@ async fn one_failing_target_does_not_stop_the_other_rules() {
     h.price.set(MINT, Ok(150.0));
     h.price.set(
         "BadMint1111111111111111111111111111111111111",
-        Err(chainsentinel::providers::ProviderError::Unavailable(
+        Err(watchtower::providers::ProviderError::Unavailable(
             "down".into(),
         )),
     );
@@ -446,7 +446,7 @@ async fn disabled_rules_are_not_evaluated_and_rearm_when_re_enabled() {
 
 #[tokio::test]
 async fn alerts_are_recorded_even_when_no_admin_can_receive_them() {
-    use chainsentinel::db::repos::users::UserRepo;
+    use watchtower::db::repos::users::UserRepo;
 
     let h = harness().await;
     h.price.set(MINT, Ok(150.0));
@@ -543,10 +543,10 @@ async fn re_enabling_a_rule_clears_its_cooldown_so_the_next_breach_alerts() {
 /// promptly on cancellation rather than waiting out the current interval.
 #[tokio::test]
 async fn the_monitoring_loop_polls_on_schedule_and_stops_on_cancellation() {
-    use chainsentinel::app_state::AppState;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio_util::sync::CancellationToken;
+    use watchtower::app_state::AppState;
 
     let db = support::database().await;
     let shutdown = CancellationToken::new();
@@ -567,8 +567,7 @@ async fn the_monitoring_loop_polls_on_schedule_and_stops_on_cancellation() {
     );
 
     let status = state.status.clone();
-    let loop_handle =
-        tokio::spawn(async move { chainsentinel::engine::scheduler::run(state).await });
+    let loop_handle = tokio::spawn(async move { watchtower::engine::scheduler::run(state).await });
 
     tokio::time::sleep(Duration::from_millis(400)).await;
 

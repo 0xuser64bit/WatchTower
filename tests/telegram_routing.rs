@@ -6,10 +6,10 @@
 
 mod support;
 
-use chainsentinel::telegram::flows::DialogueState;
 use mockito::Matcher;
 use std::sync::Arc;
 use teloxide::dispatching::dialogue::InMemStorage;
+use watchtower::telegram::flows::DialogueState;
 
 /// Asserts that dispatching `text` produces a reply containing `expected`.
 async fn assert_reply_contains(text: &str, expected: &str) {
@@ -49,7 +49,7 @@ async fn assert_reply_contains(text: &str, expected: &str) {
 
 #[tokio::test]
 async fn start_reaches_the_welcome_handler() {
-    assert_reply_contains("/start", "ChainSentinel watches Solana").await;
+    assert_reply_contains("/start", "WatchTower watches Solana").await;
 }
 
 #[tokio::test]
@@ -311,7 +311,7 @@ async fn non_command_group_messages_are_ignored_silently() {
 
 #[tokio::test]
 async fn blocking_a_user_takes_effect_mid_flow() {
-    use chainsentinel::db::repos::users::UserRepo;
+    use watchtower::db::repos::users::UserRepo;
 
     let mut server = mockito::Server::new_async().await;
 
@@ -367,7 +367,7 @@ async fn blocking_a_user_takes_effect_mid_flow() {
     }
 
     assert!(
-        chainsentinel::db::repos::tokens::TokenRepo::new(&db)
+        watchtower::db::repos::tokens::TokenRepo::new(&db)
             .list()
             .await
             .unwrap()
@@ -423,7 +423,7 @@ async fn the_command_menu_is_published_to_telegram() {
         Arc::new(support::FakeChainProvider::new()),
     );
 
-    chainsentinel::telegram::menu::publish(&state.bot, &state.db).await;
+    watchtower::telegram::menu::publish(&state.bot, &state.db).await;
 
     all_private.assert_async().await;
     admin_scope.assert_async().await;
@@ -455,5 +455,5 @@ async fn a_failed_menu_publish_is_not_fatal() {
     );
 
     // Must simply return.
-    chainsentinel::telegram::menu::publish(&state.bot, &state.db).await;
+    watchtower::telegram::menu::publish(&state.bot, &state.db).await;
 }

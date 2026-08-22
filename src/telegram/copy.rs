@@ -15,7 +15,7 @@
 pub fn quick_start(poll_seconds: u64) -> String {
     format!(
         concat!(
-            "ChainSentinel watches Solana and messages you when something moves.\n",
+            "WatchTower watches Solana and messages you when something moves.\n",
             "\n",
             "Three steps to your first alert:\n",
             "\n",
@@ -38,7 +38,7 @@ pub fn quick_start(poll_seconds: u64) -> String {
 pub fn returning_welcome(watching: &str) -> String {
     format!(
         concat!(
-            "ChainSentinel is watching {0}.\n",
+            "WatchTower is watching {0}.\n",
             "\n",
             "Check in:\n",
             "  /alerts    your alerts, and whether any are firing\n",
@@ -60,7 +60,7 @@ pub const NO_ADMINS_WARNING: &str = concat!(
 );
 
 pub const HELP: &str = concat!(
-    "ChainSentinel - price and balance alerts for Solana.\n",
+    "WatchTower - price and balance alerts for Solana.\n",
     "\n",
     "HOW ALERTS WORK\n",
     "  An alert fires when its condition becomes true, then goes quiet\n",
@@ -160,7 +160,7 @@ pub const PASTED_AN_ADDRESS: &str = concat!(
 pub const NOT_A_COMMAND: &str = "I only take commands. /help lists them, /start if you're new.";
 
 pub const NOT_A_PRIVATE_CHAT: &str = concat!(
-    "ChainSentinel only works in a direct message.\n",
+    "WatchTower only works in a direct message.\n",
     "Open a private chat with me and send /start."
 );
 

@@ -2,13 +2,13 @@
 
 mod support;
 
-use chainsentinel::db::repos::rules::{NewRuleTarget, RuleRepo};
-use chainsentinel::db::repos::tokens::TokenRepo;
-use chainsentinel::db::repos::users::{Role, UserRepo};
-use chainsentinel::db::repos::wallets::WalletRepo;
-use chainsentinel::db::Db;
-use chainsentinel::error::AppError;
-use chainsentinel::rules::types::Operator;
+use watchtower::db::repos::rules::{NewRuleTarget, RuleRepo};
+use watchtower::db::repos::tokens::TokenRepo;
+use watchtower::db::repos::users::{Role, UserRepo};
+use watchtower::db::repos::wallets::WalletRepo;
+use watchtower::db::Db;
+use watchtower::error::AppError;
+use watchtower::rules::types::Operator;
 
 const MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const WALLET: &str = "So11111111111111111111111111111111111111112";

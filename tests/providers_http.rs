@@ -3,12 +3,12 @@
 //! Covers the behaviour that decides whether alerting keeps working under real
 //! conditions: rate limits, server errors, failover, and batching.
 
-use chainsentinel::config::Commitment;
-use chainsentinel::providers::price::CoinGeckoProvider;
-use chainsentinel::providers::solana::SolanaRpcProvider;
-use chainsentinel::providers::{ChainProvider, PriceProvider, ProviderError};
 use mockito::Matcher;
 use std::time::Duration;
+use watchtower::config::Commitment;
+use watchtower::providers::price::CoinGeckoProvider;
+use watchtower::providers::solana::SolanaRpcProvider;
+use watchtower::providers::{ChainProvider, PriceProvider, ProviderError};
 
 const MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const TIMEOUT: Duration = Duration::from_secs(5);

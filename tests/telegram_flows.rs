@@ -5,23 +5,23 @@
 
 mod support;
 
-use chainsentinel::db::repos::rules::RuleRepo;
-use chainsentinel::db::repos::tokens::TokenRepo;
-use chainsentinel::db::repos::users::{Role, UserRepo};
-use chainsentinel::db::repos::wallets::WalletRepo;
-use chainsentinel::providers::ProviderError;
-use chainsentinel::rules::types::{Operator, TargetKind};
-use chainsentinel::telegram::flows::DialogueState;
 use mockito::Matcher;
 use std::sync::Arc;
 use teloxide::dispatching::dialogue::InMemStorage;
+use watchtower::db::repos::rules::RuleRepo;
+use watchtower::db::repos::tokens::TokenRepo;
+use watchtower::db::repos::users::{Role, UserRepo};
+use watchtower::db::repos::wallets::WalletRepo;
+use watchtower::providers::ProviderError;
+use watchtower::rules::types::{Operator, TargetKind};
+use watchtower::telegram::flows::DialogueState;
 
 const MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const WALLET: &str = "So11111111111111111111111111111111111111112";
 
 struct Session {
     server: mockito::ServerGuard,
-    state: chainsentinel::app_state::AppState,
+    state: watchtower::app_state::AppState,
     storage: Arc<InMemStorage<DialogueState>>,
     price: Arc<support::FakePriceProvider>,
     chain: Arc<support::FakeChainProvider>,
@@ -138,7 +138,7 @@ async fn an_invalid_mint_is_rejected_without_leaving_the_step() {
     // Still awaiting a mint, so the user can simply try again.
     assert!(matches!(
         session.dialogue_state().await,
-        DialogueState::AddToken(chainsentinel::telegram::flows::add_token::Step::AwaitingMint)
+        DialogueState::AddToken(watchtower::telegram::flows::add_token::Step::AwaitingMint)
     ));
 
     session.send_all(&[MINT, "-", "yes"]).await;
@@ -291,7 +291,7 @@ async fn the_add_alert_flow_refuses_an_untracked_target_number() {
     assert!(matches!(
         session.dialogue_state().await,
         DialogueState::AddAlert(
-            chainsentinel::telegram::flows::add_alert::Step::AwaitingTarget { .. }
+            watchtower::telegram::flows::add_alert::Step::AwaitingTarget { .. }
         )
     ));
     assert!(RuleRepo::new(&session.state.db)
@@ -324,7 +324,7 @@ async fn the_add_alert_flow_rejects_nonsense_thresholds() {
     assert!(matches!(
         session.dialogue_state().await,
         DialogueState::AddAlert(
-            chainsentinel::telegram::flows::add_alert::Step::AwaitingThreshold { .. }
+            watchtower::telegram::flows::add_alert::Step::AwaitingThreshold { .. }
         )
     ));
 

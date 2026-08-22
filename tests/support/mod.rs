@@ -6,16 +6,16 @@
 
 #![allow(dead_code)]
 
-use chainsentinel::app_state::AppState;
-use chainsentinel::config::Settings;
-use chainsentinel::db::Db;
-use chainsentinel::providers::{ChainProvider, PriceProvider, ProviderError, ProviderResult};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use teloxide::types::{Me, Update, UpdateKind};
 use teloxide::Bot;
 use tokio_util::sync::CancellationToken;
+use watchtower::app_state::AppState;
+use watchtower::config::Settings;
+use watchtower::db::Db;
+use watchtower::providers::{ChainProvider, PriceProvider, ProviderError, ProviderResult};
 
 pub const BOT_TOKEN: &str = "1234567890:test-token-value";
 pub const ADMIN_ID: i64 = 111;
@@ -164,7 +164,7 @@ pub fn settings(overrides: &[(&str, &str)]) -> Settings {
 
 /// A migrated in-memory database with one active admin.
 pub async fn database() -> Arc<Db> {
-    use chainsentinel::db::repos::users::{Role, UserRepo};
+    use watchtower::db::repos::users::{Role, UserRepo};
 
     let db = Db::connect_in_memory().await.expect("connect");
     db.migrate().await.expect("migrate");
@@ -197,7 +197,7 @@ pub fn app_state(
 
 pub fn me() -> Me {
     serde_json::from_str(
-        r#"{"id":1,"is_bot":true,"first_name":"ChainSentinel","username":"chainsentinel_bot",
+        r#"{"id":1,"is_bot":true,"first_name":"WatchTower","username":"watchtower_bot",
             "can_join_groups":false,"can_read_all_group_messages":false,
             "supports_inline_queries":false,"can_connect_to_business":false,
             "has_main_web_app":false}"#,
@@ -248,9 +248,7 @@ pub fn message(text: &str) -> Update {
 pub async fn dispatch(
     state: &AppState,
     storage: Arc<
-        teloxide::dispatching::dialogue::InMemStorage<
-            chainsentinel::telegram::flows::DialogueState,
-        >,
+        teloxide::dispatching::dialogue::InMemStorage<watchtower::telegram::flows::DialogueState>,
     >,
     update: Update,
 ) -> Result<(), String> {
@@ -261,7 +259,7 @@ pub async fn dispatch(
         deps.insert(msg);
     }
 
-    match chainsentinel::telegram::schema().dispatch(deps).await {
+    match watchtower::telegram::schema().dispatch(deps).await {
         std::ops::ControlFlow::Break(Ok(())) => Ok(()),
         std::ops::ControlFlow::Break(Err(err)) => Err(err.to_string()),
         std::ops::ControlFlow::Continue(_) => Err("update was not handled".to_string()),

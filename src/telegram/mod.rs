@@ -18,7 +18,7 @@ type HandlerError = Box<dyn std::error::Error + Send + Sync>;
 /// Every argument is taken as `String` and parsed by the handler so invalid ids get a
 /// command-specific usage reply.
 #[derive(BotCommands, Clone, Debug, PartialEq)]
-#[command(rename_rule = "lowercase", description = "ChainSentinel commands")]
+#[command(rename_rule = "lowercase", description = "WatchTower commands")]
 pub enum Command {
     #[command(description = "show the welcome message and command list")]
     Start,

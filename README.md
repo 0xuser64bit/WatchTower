@@ -1,6 +1,6 @@
-# ChainSentinel
+# WatchTower
 
-ChainSentinel is a private, read-only Solana monitoring daemon controlled through
+WatchTower is a private, read-only Solana monitoring daemon controlled through
 Telegram. It polls token prices and native SOL balances, evaluates alert rules, and
 notifies the active administrators when a condition becomes true.
 
@@ -88,7 +88,7 @@ Important production settings:
   rate-limits quickly; prices require one request per tracked token.
 - `SOLANA_RPC_ENDPOINTS`: comma-separated failover endpoints. Wallet balances are read
   in one batched RPC request per poll.
-- `DATABASE_URL`: defaults to `sqlite://data/chainsentinel.db`.
+- `DATABASE_URL`: defaults to `sqlite://data/watchtower.db`.
 - `POLL_INTERVAL_SECONDS`: 10 to 86400 seconds; the default is 60.
 - `ALERT_DEFAULT_COOLDOWN_SECONDS`: default cooldown for new rules, from 0 to 86400.
 - `ALERT_HISTORY_RETENTION_DAYS`: pruning window, from 1 to 3650 days; default 90.
@@ -98,6 +98,32 @@ Important production settings:
 `ADMIN_TELEGRAM_IDS` seeds missing users on startup. The users table is the authority
 after that: removing an id from the environment does not undo a database demotion or
 block.
+
+### Upgrading From ChainSentinel
+
+The WatchTower rename changes the default database filename from
+`chainsentinel.db` to `watchtower.db`. Existing data is not moved automatically. Stop
+the old process, make a SQLite backup at the new path, then install the renamed service
+and binary:
+
+```bash
+sudo systemctl stop chainsentinel
+sudo useradd --system --home /opt/watchtower --shell /usr/sbin/nologin watchtower
+sudo mkdir -p /opt/watchtower/data /opt/watchtower/logs
+sudo sqlite3 /opt/chainsentinel/data/chainsentinel.db \
+  ".backup '/opt/watchtower/data/watchtower.db'"
+sudo cp target/release/watchtower /opt/watchtower/
+sudo cp .env /opt/watchtower/
+sudo chown -R watchtower:watchtower /opt/watchtower
+sudo chmod 600 /opt/watchtower/.env
+sudo systemctl disable chainsentinel
+sudo cp deploy/watchtower.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now watchtower
+```
+
+After verifying `/status`, remove the obsolete `chainsentinel` service and installation
+at a maintenance window of your choosing.
 
 ## Run Locally
 
@@ -123,37 +149,37 @@ once the bot is reachable.
 ## Deploy With systemd
 
 The repository includes a hardened unit at
-[deploy/chainsentinel.service](deploy/chainsentinel.service). A typical Ubuntu layout
+[deploy/watchtower.service](deploy/watchtower.service). A typical Ubuntu layout
 is:
 
 ```bash
-sudo useradd --system --home /opt/chainsentinel --shell /usr/sbin/nologin chainsentinel
-sudo mkdir -p /opt/chainsentinel/data /opt/chainsentinel/logs
-sudo cp target/release/chainsentinel /opt/chainsentinel/
-sudo cp .env /opt/chainsentinel/
-sudo chown -R chainsentinel:chainsentinel /opt/chainsentinel
-sudo chmod 600 /opt/chainsentinel/.env
-sudo cp deploy/chainsentinel.service /etc/systemd/system/
+sudo useradd --system --home /opt/watchtower --shell /usr/sbin/nologin watchtower
+sudo mkdir -p /opt/watchtower/data /opt/watchtower/logs
+sudo cp target/release/watchtower /opt/watchtower/
+sudo cp .env /opt/watchtower/
+sudo chown -R watchtower:watchtower /opt/watchtower
+sudo chmod 600 /opt/watchtower/.env
+sudo cp deploy/watchtower.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now chainsentinel
+sudo systemctl enable --now watchtower
 ```
 
 Check the service with:
 
 ```bash
-systemctl status chainsentinel
-journalctl -u chainsentinel -f
+systemctl status watchtower
+journalctl -u watchtower -f
 ```
 
 Migrations run transactionally at startup. Before replacing a running binary, stop the
 service and create a consistent SQLite backup:
 
 ```bash
-sudo systemctl stop chainsentinel
-sudo -u chainsentinel sqlite3 /opt/chainsentinel/data/chainsentinel.db \
-  ".backup '/opt/chainsentinel/data/chainsentinel-backup.db'"
-sudo cp target/release/chainsentinel /opt/chainsentinel/
-sudo systemctl start chainsentinel
+sudo systemctl stop watchtower
+sudo -u watchtower sqlite3 /opt/watchtower/data/watchtower.db \
+  ".backup '/opt/watchtower/data/watchtower-backup.db'"
+sudo cp target/release/watchtower /opt/watchtower/
+sudo systemctl start watchtower
 ```
 
 The database contains tracked targets, users, rules, and alert history. Back it up
@@ -234,7 +260,7 @@ through local fakes. After deployment, use this short smoke test against a priva
 
 ## License
 
-ChainSentinel is released under the [MIT License](LICENSE).
+WatchTower is released under the [MIT License](LICENSE).
 
 ## Stack
 

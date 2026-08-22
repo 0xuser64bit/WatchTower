@@ -38,7 +38,7 @@ async fn build(state: &AppState) -> crate::error::Result<String> {
     let poll_interval = state.settings.poll_interval;
 
     let mut lines = vec![format!(
-        "ChainSentinel {} — {}",
+        "WatchTower {} — {}",
         env!("CARGO_PKG_VERSION"),
         if snapshot.is_healthy(poll_interval) {
             "healthy"

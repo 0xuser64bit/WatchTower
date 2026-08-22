@@ -8,11 +8,11 @@
 //! cargo test --test live_providers -- --ignored --nocapture
 //! ```
 
-use chainsentinel::config::Commitment;
-use chainsentinel::providers::price::CoinGeckoProvider;
-use chainsentinel::providers::solana::SolanaRpcProvider;
-use chainsentinel::providers::{ChainProvider, PriceProvider};
 use std::time::Duration;
+use watchtower::config::Commitment;
+use watchtower::providers::price::CoinGeckoProvider;
+use watchtower::providers::solana::SolanaRpcProvider;
+use watchtower::providers::{ChainProvider, PriceProvider};
 
 /// USDC, which is reliably listed and priced near 1 USD.
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
@@ -61,7 +61,7 @@ async fn an_unlisted_mint_is_reported_as_unsupported() {
 
     println!("unlisted mint error: {err}");
     assert!(
-        matches!(err, chainsentinel::providers::ProviderError::Unsupported(_)),
+        matches!(err, watchtower::providers::ProviderError::Unsupported(_)),
         "{err}"
     );
 }
@@ -122,20 +122,20 @@ async fn batches_real_balances_and_treats_missing_accounts_as_zero() {
 #[tokio::test]
 #[ignore = "requires network access to CoinGecko and a Solana RPC endpoint"]
 async fn a_real_monitoring_cycle_reads_evaluates_and_records() {
-    use chainsentinel::app_state::AppState;
-    use chainsentinel::config::Settings;
-    use chainsentinel::db::repos::alert_events::AlertEventRepo;
-    use chainsentinel::db::repos::rules::{NewRuleTarget, RuleRepo};
-    use chainsentinel::db::repos::tokens::TokenRepo;
-    use chainsentinel::db::repos::users::{Role, UserRepo};
-    use chainsentinel::db::repos::wallets::WalletRepo;
-    use chainsentinel::db::Db;
-    use chainsentinel::engine::scheduler;
-    use chainsentinel::providers::price::CoinGeckoProvider;
-    use chainsentinel::providers::solana::SolanaRpcProvider;
-    use chainsentinel::rules::types::{Operator, RuleState};
     use std::collections::HashMap;
     use std::sync::Arc;
+    use watchtower::app_state::AppState;
+    use watchtower::config::Settings;
+    use watchtower::db::repos::alert_events::AlertEventRepo;
+    use watchtower::db::repos::rules::{NewRuleTarget, RuleRepo};
+    use watchtower::db::repos::tokens::TokenRepo;
+    use watchtower::db::repos::users::{Role, UserRepo};
+    use watchtower::db::repos::wallets::WalletRepo;
+    use watchtower::db::Db;
+    use watchtower::engine::scheduler;
+    use watchtower::providers::price::CoinGeckoProvider;
+    use watchtower::providers::solana::SolanaRpcProvider;
+    use watchtower::rules::types::{Operator, RuleState};
 
     let db = Db::connect_in_memory().await.unwrap();
     db.migrate().await.unwrap();
