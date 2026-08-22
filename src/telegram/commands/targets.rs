@@ -38,11 +38,11 @@ async fn render_tokens(state: &AppState, msg: &Message) -> Result<()> {
         .iter()
         .map(|token| {
             format!(
-                "{}. {} — {}\n   {} alert rule(s)",
+                "{}. {} — {}\n   {}",
                 token.id,
                 token.symbol.as_deref().unwrap_or("no symbol"),
                 token.mint_address,
-                token.rule_count
+                rule_count(token.rule_count)
             )
         })
         .collect::<Vec<_>>()
@@ -125,11 +125,11 @@ async fn render_wallets(state: &AppState, msg: &Message) -> Result<()> {
         .iter()
         .map(|wallet| {
             format!(
-                "{}. {} — {}\n   {} alert rule(s)",
+                "{}. {} — {}\n   {}",
                 wallet.id,
                 wallet.label.as_deref().unwrap_or("no label"),
                 wallet.address,
-                wallet.rule_count
+                rule_count(wallet.rule_count)
             )
         })
         .collect::<Vec<_>>()
@@ -183,6 +183,15 @@ async fn remove_wallet(state: &AppState, msg: &Message, id: i64) -> Result<()> {
     Ok(())
 }
 
+/// How many alerts watch a target, phrased so the common cases read naturally.
+fn rule_count(count: i64) -> String {
+    match count {
+        0 => "no alerts yet".to_string(),
+        1 => "1 alert".to_string(),
+        n => format!("{n} alerts"),
+    }
+}
+
 /// Cascading deletes are reported explicitly: silently removing a user's alert rules
 /// is exactly the kind of surprise that erodes trust in a monitoring tool.
 fn cascade_note(rules_removed: i64) -> String {
@@ -196,6 +205,13 @@ fn cascade_note(rules_removed: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rule_counts_read_naturally() {
+        assert_eq!(rule_count(0), "no alerts yet");
+        assert_eq!(rule_count(1), "1 alert");
+        assert_eq!(rule_count(7), "7 alerts");
+    }
 
     #[test]
     fn cascade_note_reads_naturally() {

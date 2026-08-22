@@ -294,6 +294,12 @@ per-rule detail.
 **Data** lives entirely in the SQLite file. Back that up and you have backed up
 everything except `.env`.
 
+## Testing it yourself
+
+[TESTING.md](TESTING.md) is a 25-step walkthrough of every user-facing behaviour, with
+the exact output to expect and why each behaviour is designed that way. Nine steps are
+marked blocking; the rest are worth doing once.
+
 ## Development
 
 ```bash

@@ -121,8 +121,10 @@ async fn build(state: &AppState) -> crate::error::Result<String> {
 
     lines.push(String::new());
     lines.push("Alerts".to_string());
+    // "fired", not "delivered": an alert with no reachable recipient is still recorded,
+    // and the recipient count below is what says whether it actually landed.
     lines.push(format!(
-        "  delivered since start: {}",
+        "  fired since start: {}",
         snapshot.alerts_sent_total
     ));
     lines.push(format!("  history entries: {events}"));
