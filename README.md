@@ -16,8 +16,8 @@ transaction signing, multi-chain support, or multi-tenant data separation.
 
 Rules support `>`, `<`, `>=`, `<=`, `%up`, and `%down`. Values are sampled every
 `POLL_INTERVAL_SECONDS` (60 seconds by default), so this is interval monitoring rather
-than transaction or mempool monitoring. A token must have a CoinGecko price before it
-can be tracked.
+than transaction or mempool monitoring. An unlisted token cannot be tracked, but a
+temporary price-provider outage does not block saving a valid mint.
 
 Alerts are edge-triggered: a rule fires when its condition becomes true and stays
 quiet until the condition clears. Percentage rules use a rolling baseline that is set
