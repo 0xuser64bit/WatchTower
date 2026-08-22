@@ -1,0 +1,5 @@
+[advisories]
+# sqlx records sqlx-mysql in Cargo.lock even when only the sqlite feature is
+# enabled. rsa is a MySQL-auth dependency of that unused crate, has no patch,
+# and is not compiled into this binary.
+ignore = ["RUSTSEC-2023-0071"]

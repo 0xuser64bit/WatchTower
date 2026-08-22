@@ -64,7 +64,7 @@ impl Authorization {
 
 /// Resolves the sender of `message` against the users table.
 pub async fn authorize(db: &Db, message: &Message) -> Result<Authorization> {
-    let Some(sender) = message.from() else {
+    let Some(sender) = message.from.as_ref() else {
         return Ok(Authorization::Denied(DenyReason::NoSender));
     };
 

@@ -199,7 +199,8 @@ pub fn me() -> Me {
     serde_json::from_str(
         r#"{"id":1,"is_bot":true,"first_name":"ChainSentinel","username":"chainsentinel_bot",
             "can_join_groups":false,"can_read_all_group_messages":false,
-            "supports_inline_queries":false}"#,
+            "supports_inline_queries":false,"can_connect_to_business":false,
+            "has_main_web_app":false}"#,
     )
     .expect("me json")
 }

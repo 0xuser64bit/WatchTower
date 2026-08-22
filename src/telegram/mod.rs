@@ -170,7 +170,7 @@ pub async fn run(state: AppState) {
         .default_handler(|update| async move {
             // Non-message updates (edits, callbacks, channel posts). Expected, but
             // recorded at debug so an unexpected flood is diagnosable.
-            tracing::debug!(update_id = update.id, "unhandled update kind");
+            tracing::debug!(update_id = update.id.0, "unhandled update kind");
         })
         // Endpoint errors are reported to the user by the handlers themselves; this
         // is the last resort for anything that escaped, and it must never be silent.
