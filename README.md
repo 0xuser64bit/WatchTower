@@ -232,6 +232,10 @@ through local fakes. After deployment, use this short smoke test against a priva
 5. Confirm commands are refused in a group chat and that a blocked user loses access on
    their next message, including during a guided flow.
 
+## License
+
+ChainSentinel is released under the [MIT License](LICENSE).
+
 ## Stack
 
 Rust 2021, Tokio, teloxide, reqwest with rustls, sqlx with SQLite/WAL, tracing, and

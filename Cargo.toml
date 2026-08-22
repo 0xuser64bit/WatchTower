@@ -4,6 +4,8 @@ version = "0.2.0"
 edition = "2021"
 description = "Private Telegram-controlled Solana monitoring and alerting platform"
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/0xuser64bit/chainSentinel"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
