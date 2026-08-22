@@ -99,32 +99,6 @@ Important production settings:
 after that: removing an id from the environment does not undo a database demotion or
 block.
 
-### Upgrading From ChainSentinel
-
-The WatchTower rename changes the default database filename from
-`chainsentinel.db` to `watchtower.db`. Existing data is not moved automatically. Stop
-the old process, make a SQLite backup at the new path, then install the renamed service
-and binary:
-
-```bash
-sudo systemctl stop chainsentinel
-sudo useradd --system --home /opt/watchtower --shell /usr/sbin/nologin watchtower
-sudo mkdir -p /opt/watchtower/data /opt/watchtower/logs
-sudo sqlite3 /opt/chainsentinel/data/chainsentinel.db \
-  ".backup '/opt/watchtower/data/watchtower.db'"
-sudo cp target/release/watchtower /opt/watchtower/
-sudo cp .env /opt/watchtower/
-sudo chown -R watchtower:watchtower /opt/watchtower
-sudo chmod 600 /opt/watchtower/.env
-sudo systemctl disable chainsentinel
-sudo cp deploy/watchtower.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now watchtower
-```
-
-After verifying `/status`, remove the obsolete `chainsentinel` service and installation
-at a maintenance window of your choosing.
-
 ## Run Locally
 
 The control script builds a release binary when needed and manages a local process,
