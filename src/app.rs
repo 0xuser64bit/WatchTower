@@ -16,9 +16,8 @@ use tracing::{error, info, warn};
 /// How long in-flight work gets to finish after a shutdown signal.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(20);
 
-/// Why the process is stopping. Determines the exit code, so a supervisor and an
-/// operator can tell a requested shutdown from a component failure. Previously any
-/// outcome, including the control plane dying at startup, exited zero.
+/// Why the process is stopping. Determines the exit code so a supervisor and an
+/// operator can distinguish a requested shutdown from a component failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stop {
     /// SIGTERM or SIGINT.

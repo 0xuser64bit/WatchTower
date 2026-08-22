@@ -143,11 +143,8 @@ impl<'a> RuleRepo<'a> {
     }
 
     pub async fn set_enabled(&self, id: i64, enabled: bool) -> Result<Rule> {
-        // Enabling resets all evaluation state, so "enable" means a clean start and
-        // nothing else. Without this a rule re-enabled inside its old cooldown window
-        // would latch straight back to firing and swallow the alert the user just
-        // asked for, and a percentage rule would measure change across the entire
-        // period it was switched off.
+        // Enabling is an explicit re-arm: clear evaluation state so the rule starts a
+        // fresh cycle and percentage rules establish a new baseline.
         let result = sqlx::query(
             "UPDATE rules SET enabled = ?1, \
                  state = 'ok', \

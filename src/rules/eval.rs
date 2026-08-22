@@ -5,11 +5,7 @@
 //! database, a clock, or a Telegram connection.
 //!
 //! Alerting is **edge-triggered**. A rule fires on the transition from `Ok` to
-//! `Firing` and then stays quiet while the condition remains true. The previous
-//! implementation compared a time-bucketed SHA-256 of the rule against a UNIQUE
-//! column, which meant a rule whose condition stayed true re-notified on every
-//! cooldown expiry indefinitely, while a rule that genuinely re-crossed its
-//! threshold inside the same clock bucket was suppressed. Cooldown is retained as a
+//! `Firing` and then stays quiet while the condition remains true. Cooldown is a
 //! secondary rate limit for conditions that oscillate across the threshold.
 
 use crate::rules::types::{Operator, Rule, RuleState};
@@ -322,8 +318,8 @@ mod tests {
 
     #[test]
     fn a_continuous_breach_notifies_exactly_once() {
-        // Regression guard for the original defect: a rule that stays above its
-        // threshold must produce one notification, not one per cooldown period.
+        // A continuously true condition produces one notification, not one per
+        // cooldown period.
         let mut rule = rule(Operator::Gt, 10.0);
         let mut notifications = 0;
 

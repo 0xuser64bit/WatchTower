@@ -1,10 +1,7 @@
 //! Alert delivery.
 //!
-//! Recipients come from the `users` table only: active admins. The previous
-//! implementation fell back to the first id in `ADMIN_TELEGRAM_IDS` whenever the
-//! admin table came back empty, which let a demoted or blocked operator keep
-//! receiving alerts purely because their id remained in a config file. Configuration
-//! seeds the table; it is not a parallel authorization path.
+//! Recipients come from the `users` table only: active admins. Configuration seeds
+//! missing users at startup; it is not a parallel authorization path.
 
 use crate::alerts::format;
 use crate::db::repos::alert_events::AlertEventRepo;

@@ -1,19 +1,15 @@
 //! Rendering of values and alert messages.
 //!
 //! All output is plain text. Telegram's Markdown parse modes are deliberately not
-//! used: alert bodies contain user-supplied labels and base58 addresses, which would
-//! need escaping on every path, and a single missed escape turns into a failed send
-//! (and therefore a missed alert) rather than a cosmetic defect.
+//! used because alert bodies contain user-supplied labels and base58 addresses that
+//! would need escaping on every path.
 
 use crate::rules::eval::Decision;
 use crate::rules::types::{Operator, Rule, TargetKind};
 use chrono::{DateTime, Utc};
 
-/// Formats a quantity with enough precision to stay meaningful.
-///
-/// Fixed two-decimal formatting was used everywhere previously, which rendered any
-/// token priced below a cent as `0.00` — i.e. useless for most of what people
-/// actually track on Solana, and actively misleading in an alert.
+/// Formats a quantity with enough precision to stay meaningful, including sub-cent
+/// token prices.
 pub fn amount(value: f64) -> String {
     if !value.is_finite() {
         return "n/a".to_string();
@@ -87,9 +83,8 @@ pub fn alert_message(rule: &Rule, decision: &Decision, at: DateTime<Utc>) -> Opt
     ];
 
     if rule.operator.is_percentage() {
-        // Percentage rules previously reported the computed percentage in the
-        // "current value" field, so the message showed neither the price nor the
-        // baseline it was measured against.
+        // Include both the observed value and its baseline so the movement is
+        // interpretable without consulting the rule listing.
         let baseline = reference.unwrap_or_default();
         let moved = change_pct(*observed, baseline)
             .map(percent)
@@ -153,7 +148,7 @@ mod tests {
 
     #[test]
     fn keeps_precision_for_sub_cent_prices() {
-        // The original `{:.2}` rendering collapsed all of these to "0.00".
+        // Small token prices must retain enough precision to remain useful.
         assert_eq!(amount(0.0000123), "0.0000123");
         assert_eq!(amount(0.00000000456), "0.00000000456");
         assert_eq!(amount(0.999893), "0.9999");

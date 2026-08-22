@@ -146,8 +146,8 @@ impl Settings {
     }
 
     fn validate(&self) -> Result<()> {
-        // Catches the placeholder shipped in `.env.example` and obvious typos before
-        // the process starts long-polling with a token Telegram will reject.
+        // Reject placeholders and obvious typos before the process starts long-polling
+        // with a token Telegram will reject.
         let token = self.telegram_bot_token.expose();
         if token == "replace_me" || !token.contains(':') || token.len() < 20 {
             return Err(ConfigError::Invalid {

@@ -1,8 +1,7 @@
 //! `/status` — operational visibility from inside Telegram.
 //!
-//! Answers the questions an operator actually has during an incident: is the engine
-//! polling, are the providers reachable, what failed and when. There was previously
-//! no way to tell a healthy daemon from one whose monitoring loop had stopped.
+//! Answers the questions an operator has during an incident: is the engine polling,
+//! are the providers reachable, and what failed and when.
 
 use crate::alerts::format;
 use crate::app_state::AppState;

@@ -3,9 +3,8 @@
 //! One tick reads every enabled rule, resolves the current value of each distinct
 //! target, evaluates, and dispatches. Two properties matter most:
 //!
-//! * **Failures are isolated per rule.** The previous implementation propagated the
-//!   first error out of the tick with `?`, so one unreachable mint or one Telegram
-//!   hiccup silently skipped every remaining rule for that interval.
+//! * **Failures are isolated per rule.** One unreachable target or delivery failure
+//!   does not skip every remaining rule for that interval.
 //! * **Targets are read once per tick, not once per rule.** Values are resolved for
 //!   distinct targets up front, and wallet balances are fetched in a single batched
 //!   RPC call rather than one request per wallet.

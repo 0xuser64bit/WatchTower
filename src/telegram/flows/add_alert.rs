@@ -1,10 +1,7 @@
 //! Guided alert rule creation.
 //!
 //! The target is chosen from the tracked tokens and wallets rather than typed as a
-//! free-text address. Previously any string that looked like base58 was accepted and
-//! stored on the rule with no relation to the tracked directory, so it was possible
-//! to create an alert for something the user had never added — and deleting a token
-//! left its rules polling forever.
+//! free-text address, keeping every rule attached to a relational target.
 
 use crate::app_state::AppState;
 use crate::db::repos::rules::{NewRuleTarget, RuleRepo};

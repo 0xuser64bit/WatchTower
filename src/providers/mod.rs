@@ -53,10 +53,8 @@ impl ProviderError {
 pub type ProviderResult<T> = Result<T, ProviderError>;
 
 /// Retries `operation` with exponential backoff while the error is retryable.
-///
-/// Public APIs used here (CoinGecko's free tier, public Solana RPC) rate-limit
-/// aggressively; a single 429 previously ended the poll for that asset until the next
-/// tick, so alerting stopped without anything looking broken.
+/// Public APIs used here rate-limit aggressively, so transient failures should not
+/// end a poll before the retry budget is exhausted.
 pub async fn with_retry<T, F, Fut>(
     label: &'static str,
     attempts: u32,

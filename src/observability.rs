@@ -1,10 +1,8 @@
 //! Logging setup.
 //!
-//! Writes to both stdout and a rolling file. The previous implementation installed a
-//! file layer only, so the shipped systemd unit produced an empty
-//! `journalctl -u chainsentinel` — which the README told operators to use — and
-//! anything that failed before the log directory existed panicked with no output at
-//! all. Startup now degrades to stdout-only rather than aborting.
+//! Writes to stdout and a rolling file. File logging is best effort: if the log
+//! directory cannot be created, startup continues with stdout so systemd and local
+//! process supervisors still receive diagnostics.
 
 use std::path::Path;
 use tracing_appender::non_blocking::WorkerGuard;

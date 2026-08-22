@@ -1,10 +1,8 @@
 //! The rule domain model.
 //!
 //! Values coming out of SQLite are parsed into closed enums at the repository
-//! boundary. The previous model kept `kind`, `operator`, and `enabled` as raw
-//! `String`/`i64` fields and coerced unknown values with `unwrap_or`, so a corrupted
-//! operator silently became `>` and quietly produced wrong alerts. Anything the
-//! database holds that this build cannot interpret is now a hard error instead.
+//! boundary. Anything the database holds that this build cannot interpret is a hard
+//! error instead of an implicit default.
 
 use crate::error::{AppError, Result};
 use chrono::{DateTime, Utc};
@@ -152,8 +150,7 @@ pub fn abbreviate(address: &str) -> String {
 /// Whether the rule's condition is currently held to be true.
 ///
 /// This is what makes alerting edge-triggered: a rule fires on the transition into
-/// `Firing` and stays quiet until the condition clears. Previously a rule whose
-/// condition simply remained true re-notified on every cooldown expiry, forever.
+/// `Firing` and stays quiet until the condition clears.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuleState {
     Ok,

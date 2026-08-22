@@ -8,11 +8,8 @@ use teloxide::Bot;
 use tokio_util::sync::CancellationToken;
 
 /// Everything long-lived, shared by the control plane (Telegram) and the data plane
-/// (the monitoring engine).
-///
-/// The Telegram layer previously received only `Arc<Db>`, which is why the configured
-/// alert cooldown was ignored (the flow hardcoded 300s) and why new rules could not be
-/// validated against a provider before being saved.
+/// (the monitoring engine). Settings and providers are shared so guided flows can use
+/// the configured defaults and validate targets before saving them.
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Db>,

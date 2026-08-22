@@ -480,9 +480,7 @@ mod tests {
 
     #[test]
     fn no_message_has_ragged_indentation() {
-        // The exact defect this module exists to prevent: a mangled line continuation
-        // baking source indentation into the message. Deep indents and runs of spaces
-        // mid-sentence are both symptoms.
+        // User-facing copy must not inherit source indentation or spacing artifacts.
         for (name, text) in all_copy() {
             for (n, line) in text.lines().enumerate() {
                 let indent = line.len() - line.trim_start().len();
@@ -574,7 +572,7 @@ mod tests {
 
     #[test]
     fn onboarding_stays_short() {
-        // The original welcome was a 25-line command dump.
+        // Keep onboarding concise enough to scan in one chat bubble.
         assert!(quick_start(60).lines().count() <= 20);
         assert!(returning_welcome("1 token").lines().count() <= 15);
     }

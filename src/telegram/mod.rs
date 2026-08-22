@@ -15,11 +15,8 @@ use teloxide::utils::command::BotCommands;
 
 type HandlerError = Box<dyn std::error::Error + Send + Sync>;
 
-/// Every argument is taken as `String` and parsed by the handler.
-///
-/// Two commands previously used teloxide's typed `i64` parsing, which meant
-/// `/enablerule abc` did not match the branch at all and fell through to the generic
-/// "use /help" fallback instead of reporting a bad id.
+/// Every argument is taken as `String` and parsed by the handler so invalid ids get a
+/// command-specific usage reply.
 #[derive(BotCommands, Clone, Debug, PartialEq)]
 #[command(rename_rule = "lowercase", description = "ChainSentinel commands")]
 pub enum Command {
@@ -182,8 +179,7 @@ pub async fn run(state: AppState) {
     let dispatcher_shutdown = dispatcher.shutdown_token();
     let shutdown = state_shutdown;
 
-    // Ask the dispatcher to stop accepting updates and drain in-flight handlers,
-    // rather than dropping it mid-request as the previous `select!` did.
+    // Ask the dispatcher to stop accepting updates and drain in-flight handlers.
     let waiter = tokio::spawn(async move {
         shutdown.cancelled().await;
         tracing::info!("telegram dispatcher shutting down");

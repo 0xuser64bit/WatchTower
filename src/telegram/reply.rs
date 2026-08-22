@@ -121,9 +121,8 @@ pub async fn report_error(bot: &Bot, chat_id: ChatId, context: &'static str, err
 
 /// Terminates a handler, reporting a failure to the user exactly once.
 ///
-/// Every command and flow step funnels its result through here. Handlers used to `?`
-/// on repository calls, which returned the error to the dispatcher's error handler:
-/// it was logged, and the user was left staring at a chat that never replied.
+/// Every command and flow step funnels its result through here so infrastructure
+/// failures are logged and the user receives one safe error reply.
 pub async fn finish(
     bot: &Bot,
     chat_id: ChatId,

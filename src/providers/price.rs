@@ -114,11 +114,8 @@ impl CoinGeckoProvider {
     }
 }
 
-/// Maps HTTP status onto the provider error taxonomy.
-///
-/// Status was previously ignored entirely: an HTML 502 or a JSON 429 body was fed
-/// straight to the JSON parser and surfaced as an unhelpful deserialisation error,
-/// so genuine rate limiting was indistinguishable from a malformed response.
+/// Maps HTTP status onto the provider error taxonomy so retryable outages and
+/// deterministic response errors remain distinguishable.
 fn classify_status(response: Response) -> ProviderResult<Response> {
     let status = response.status();
 

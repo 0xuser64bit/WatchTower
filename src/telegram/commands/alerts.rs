@@ -206,8 +206,7 @@ async fn render_history(state: &AppState, msg: &Message) -> Result<()> {
         return Ok(());
     }
 
-    // Rendered from structured columns. History used to embed the whole multi-line
-    // alert message inside a single list item, which produced unreadable output.
+    // Render from structured columns so each event remains compact and readable.
     let body = events
         .iter()
         .map(|event| {

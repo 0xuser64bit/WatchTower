@@ -164,9 +164,6 @@ pub async fn non_private_chat(state: AppState, msg: Message) -> HandlerResult {
 pub async fn parse_id(state: &AppState, msg: &Message, raw: &str, usage: &str) -> Option<i64> {
     match raw.trim().parse::<i64>() {
         Ok(id) if id > 0 => Some(id),
-        // Previously `/enablerule abc` failed to match the typed command branch and
-        // fell through to the generic fallback, so the user was told to read /help
-        // instead of being told the id was invalid.
         _ => {
             reply::try_send(
                 &state.bot,

@@ -2,15 +2,9 @@
 //!
 //! All flows share **one** dialogue state whose default is [`DialogueState::Idle`].
 //!
-//! This is the fix for the defect that made the bot unusable: previously each flow
-//! had its own `InMemStorage`, and each state enum defaulted to its first *active*
-//! step (`AwaitingMint`, `AwaitingKind`, `AwaitingAddress`). Because
-//! `dialogue::enter` inserts `Default::default()` for a chat with no stored state,
-//! every user started out in `AwaitingMint`, and the add-token branch — registered
-//! before the command branch — matched every incoming message. `/start` and every
-//! other command were answered with "that does not look like a valid Solana mint
-//! address". With a single storage and an explicit idle default, no flow branch can
-//! match unless the user actually started that flow.
+//! A single storage and an explicit idle default ensure that no flow branch matches
+//! until the user starts that flow. Commands are evaluated before active steps and
+//! reset any abandoned flow.
 
 pub mod add_alert;
 pub mod add_token;
