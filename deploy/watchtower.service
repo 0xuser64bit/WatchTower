@@ -1,6 +1,6 @@
 [Unit]
 Description=WatchTower Solana monitoring daemon
-Documentation=https://github.com/0xuser64bit/chainSentinel
+Documentation=https://github.com/0xuser64bit/WatchTower
 After=network-online.target
 Wants=network-online.target
 
