@@ -521,6 +521,21 @@ mod tests {
     }
 
     #[test]
+    fn admin_help_still_fits_one_send_when_concatenated() {
+        // `/help` sends HELP and HELP_ADMIN as a single message. Chunking would handle
+        // an overflow, but splitting a reference table across two bubbles reads badly,
+        // so this is the budget to stay inside when adding to either.
+        let combined = format!("{HELP}{HELP_ADMIN}");
+        let chunks = crate::telegram::reply::chunk_message(&combined, 3900);
+        assert_eq!(
+            chunks.len(),
+            1,
+            "combined help is {} UTF-16 units",
+            combined.encode_utf16().count()
+        );
+    }
+
+    #[test]
     fn no_message_is_wider_than_a_phone_screen() {
         // Telegram wraps, but wrapping a hand-aligned column list destroys it.
         for (name, text) in all_copy() {
