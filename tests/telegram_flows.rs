@@ -270,8 +270,7 @@ async fn the_add_alert_flow_uses_the_configured_default_cooldown() {
         .await;
 
     let rules = RuleRepo::new(&session.state.db).list_all().await.unwrap();
-    // Previously hardcoded to 300 in the flow, so ALERT_DEFAULT_COOLDOWN_SECONDS was
-    // parsed, validated, and then never used anywhere.
+    // The flow uses the configured default rather than a local constant.
     assert_eq!(
         rules[0].cooldown_seconds,
         session.state.settings.alert_default_cooldown_seconds

@@ -1,15 +1,8 @@
-//! Routing regression tests for the Telegram control plane.
+//! Telegram control-plane tests.
 //!
-//! The defect these guard against made the entire bot unusable: because every
-//! guided flow had its own dialogue storage whose state defaulted to that flow's
-//! first *active* step, `dialogue::enter` put every fresh chat into
-//! `AddTokenState::AwaitingMint`, and the add-token branch — registered before the
-//! command branch — matched every message. `/start`, `/help`, `/alerts` and all the
-//! rest were answered with "that does not look like a valid Solana mint address".
-//!
-//! Each test drives the real `schema()` and asserts on the actual outgoing
-//! `sendMessage` payload, so a regression in routing, authorization, or reply text
-//! fails here rather than in production.
+//! Each test drives the real `schema()` and asserts on outgoing `sendMessage`
+//! payloads so routing, authorization, dialogue state, and reply text are verified
+//! together.
 
 mod support;
 
@@ -61,8 +54,7 @@ async fn start_reaches_the_welcome_handler() {
 
 #[tokio::test]
 async fn a_new_user_is_given_three_steps_not_a_command_dump() {
-    // Onboarding regression guard: the first message must tell someone what to press,
-    // not list every command.
+    // The first message tells someone what to press instead of listing every command.
     assert_reply_contains("/start", "/addtoken").await;
     assert_reply_contains("/start", "/addalert").await;
 }
@@ -120,8 +112,6 @@ async fn prompts_show_a_real_example_of_what_to_paste() {
 
 #[tokio::test]
 async fn a_bad_id_argument_reports_usage_instead_of_generic_help() {
-    // Previously `/enablerule abc` did not match the typed `i64` command branch at
-    // all and fell through to the "use /help" fallback.
     assert_reply_contains("/enablerule abc", "/enablerule <id>").await;
     assert_reply_contains("/deleterule ", "/deleterule <id>").await;
     // And says where the number comes from, rather than leaving the user to guess.
@@ -388,9 +378,7 @@ async fn blocking_a_user_takes_effect_mid_flow() {
 
 #[tokio::test]
 async fn the_command_menu_is_published_to_telegram() {
-    // This is what fills the `/` autocomplete list and the menu button. Without the
-    // `setMyCommands` call the bot has commands but no discoverable UI at all, which
-    // is how it shipped: the only way to find a command was to guess `/help`.
+    // This fills the `/` autocomplete list and menu button.
     let mut server = mockito::Server::new_async().await;
 
     let all_private = server

@@ -88,9 +88,7 @@ async fn a_threshold_breach_notifies_exactly_once_while_it_persists() {
     assert_eq!(stored.last_value, Some(150.0));
     assert!(stored.last_triggered_at.is_some());
 
-    // Ten further cycles with the condition still true: no more alerts. This is the
-    // behaviour the old time-bucketed dedup key could not express — it re-notified
-    // on every cooldown expiry, forever.
+    // Ten further cycles with the condition still true produce no more alerts.
     for _ in 0..10 {
         let report = scheduler::tick(&h.state).await.unwrap();
         assert_eq!(report.alerts_sent, 0);
@@ -213,8 +211,7 @@ async fn a_percentage_rule_rebaselines_after_each_alert() {
     // Same absolute price: no further move relative to the new baseline.
     assert_eq!(scheduler::tick(&h.state).await.unwrap().alerts_sent, 0);
 
-    // Another +10% from 110 fires again. Under the old fixed-reference behaviour the
-    // rule stayed anchored to 100 forever and re-fired on every cooldown.
+    // Another +10% from the new 110 baseline fires again.
     h.price.set(MINT, Ok(121.0));
     assert_eq!(scheduler::tick(&h.state).await.unwrap().alerts_sent, 1);
     assert_eq!(
@@ -303,8 +300,7 @@ async fn one_failing_target_does_not_stop_the_other_rules() {
             .unwrap();
     }
 
-    // The old implementation propagated the first provider error out of the tick with
-    // `?`, so the healthy rule was never evaluated.
+    // The provider failure is isolated, so the healthy rule is still evaluated.
     let report = scheduler::tick(&h.state).await.unwrap();
     assert_eq!(report.rules_evaluated, 1, "healthy rule must still run");
     assert_eq!(report.alerts_sent, 1);

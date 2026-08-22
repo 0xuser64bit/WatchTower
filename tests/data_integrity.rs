@@ -35,8 +35,7 @@ async fn a_deleted_token_can_be_added_again() {
     let first = repo.create(MINT, Some("USDC")).await.unwrap();
     repo.delete(first.id).await.unwrap();
 
-    // The original schema soft-deleted rows behind a UNIQUE index, so this insert
-    // failed forever and the user only saw "Failed to add token."
+    // Deletion must release the unique mint so it can be tracked again.
     let second = repo.create(MINT, Some("USDC")).await.unwrap();
     assert_ne!(second.id, first.id);
     assert_eq!(second.mint_address, MINT);

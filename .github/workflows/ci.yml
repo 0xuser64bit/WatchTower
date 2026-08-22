@@ -39,8 +39,7 @@ jobs:
       - name: Release build
         run: cargo build --release
 
-      # A migration that only works on an empty database is the failure mode that
-      # cost this project a rewrite, so the chain is applied to a seeded database.
+      # Apply the chain to seeded data so empty-only migrations cannot pass CI.
       - name: Verify migrations against a populated database
         run: ./scripts/verify-migrations.sh
 

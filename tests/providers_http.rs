@@ -75,8 +75,7 @@ async fn an_unlisted_mint_is_reported_as_unsupported_not_as_a_parse_error() {
 async fn a_rate_limit_is_recognised_rather_than_parsed_as_json() {
     let mut server = mockito::Server::new_async().await;
 
-    // The original code ignored HTTP status entirely and fed the 429 body to the JSON
-    // parser, so genuine rate limiting surfaced as an unhelpful deserialisation error.
+    // HTTP 429 must retain its rate-limit semantics instead of becoming a parse error.
     let mock = server
         .mock("GET", "/simple/token_price/solana")
         .match_query(Matcher::Any)

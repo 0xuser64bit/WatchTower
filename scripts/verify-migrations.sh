@@ -3,11 +3,9 @@
 # Applies the migration chain along every upgrade path a real deployment can take and
 # asserts the resulting schema, data, and constraints.
 #
-# Exists because migration 0002 drops the `rules` parent table while `alert_events`
-# rows still reference it, so it fails with a FOREIGN KEY violation on a populated
-# database. That was invisible because every test ran against an empty one. This
-# script keeps a migration that only works on an empty database from being merged
-# again.
+# Covers the populated-database path because migration 0002 drops the `rules` parent
+# table while `alert_events` rows still reference it. Empty databases do not exercise
+# that foreign-key path.
 #
 # 0002 cannot be edited: sqlx records a checksum per migration, so changing an applied
 # migration makes the daemon refuse to start. It is instead superseded by 0003, which
@@ -162,7 +160,7 @@ expect "deleting a target removes its rules" "0" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM rules WHERE token_id = ${token_id};")"
 expect "history is detached, not deleted" "1|1" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*), SUM(rule_id IS NULL) FROM alert_events;")"
-# The soft-delete deadlock: this insert used to fail forever against the tombstone row.
+# A removed mint must be available to track again.
 sqlite3 "${upgraded}" "PRAGMA foreign_keys = ON; INSERT INTO tokens (mint_address, symbol) VALUES ('MINT_LIVE', 'LIVE');"
 expect "a deleted mint can be tracked again" "1" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM tokens WHERE mint_address = 'MINT_LIVE';")"
