@@ -10,7 +10,7 @@ use crate::error::Result;
 use crate::providers::solana::is_valid_address;
 use crate::providers::ProviderError;
 use crate::telegram::flows::{optional_answer, reprompt, text_of, FlowDialogue, HandlerResult};
-use crate::telegram::reply;
+use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
@@ -49,12 +49,7 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
 }
 
 async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        "Send the SPL token mint address you want to track.\n\nSend /cancel to stop.",
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ASK_MINT).await?;
 
     super::advance(dialogue, Step::AwaitingMint).await?;
     Ok(())
@@ -67,16 +62,11 @@ async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> Ha
 
 async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
     let Some(mint) = text_of(msg) else {
-        return reprompt(state, msg, "Send the mint address as text.").await;
+        return reprompt(state, msg, "Paste the mint address as text.").await;
     };
 
     if !is_valid_address(mint) {
-        return reprompt(
-            state,
-            msg,
-            "That is not a valid Solana address. A mint address is 32-44 base58 characters.",
-        )
-        .await;
+        return reprompt(state, msg, copy::BAD_ADDRESS).await;
     }
 
     let mint = mint.to_string();
@@ -100,13 +90,7 @@ async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
     let price = match state.price_provider.get_token_price_usd(&mint).await {
         Ok(price) => Some(price),
         Err(ProviderError::Unsupported(_)) => {
-            reply::send_text(
-                &state.bot,
-                msg.chat.id,
-                "The price provider has no USD listing for that mint, so a price \
-                 alert could never fire. Not adding it.",
-            )
-            .await?;
+            reply::send_text(&state.bot, msg.chat.id, copy::NOT_PRICED).await?;
             super::reset(dialogue).await;
             return Ok(());
         }
@@ -125,12 +109,7 @@ async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
         None => "Could not reach the price provider to verify it right now.".to_string(),
     };
 
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("{intro}\n\nSend a symbol to label it (for example USDC), or `-` to skip."),
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ask_token_name(&intro)).await?;
 
     super::advance(dialogue, Step::AwaitingSymbol { mint, price }).await?;
     Ok(())
@@ -153,7 +132,7 @@ async fn await_symbol_body(
     (mint, _price): (String, Option<f64>),
 ) -> Result<()> {
     let Some(raw) = text_of(msg) else {
-        return reprompt(state, msg, "Send a symbol as text, or `-` to skip.").await;
+        return reprompt(state, msg, copy::ASK_SHORT_NAME).await;
     };
 
     let symbol = optional_answer(raw);
@@ -167,10 +146,7 @@ async fn await_symbol_body(
     reply::send_text(
         &state.bot,
         msg.chat.id,
-        format!(
-            "Track this token?\n\nMint: {mint}\nSymbol: {}\n\nReply `yes` to confirm, or /cancel.",
-            symbol.as_deref().unwrap_or("(none)")
-        ),
+        copy::confirm_token(symbol.as_deref().unwrap_or("(none)"), &mint),
     )
     .await?;
 
@@ -196,7 +172,7 @@ async fn confirm_body(
 ) -> Result<()> {
     if !super::is_affirmative(text_of(msg)) {
         super::reset(dialogue).await;
-        return reprompt(state, msg, "Cancelled. Nothing was added.").await;
+        return reprompt(state, msg, copy::CANCELLED_NOTHING_ADDED).await;
     }
 
     match TokenRepo::new(&state.db)
@@ -207,11 +183,7 @@ async fn confirm_body(
             reply::send_text(
                 &state.bot,
                 msg.chat.id,
-                format!(
-                    "Tracking token {} — {}.\n\nUse /addalert to create a price alert for it.",
-                    token.id,
-                    token.display()
-                ),
+                copy::token_saved(&token.display(), token.id),
             )
             .await?;
         }

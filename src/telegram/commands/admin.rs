@@ -11,20 +11,8 @@ use crate::db::repos::users::{Role, UserRepo};
 use crate::error::Result;
 use crate::telegram::commands::parse_id;
 use crate::telegram::flows::HandlerResult;
-use crate::telegram::reply;
+use crate::telegram::{copy, menu, reply};
 use teloxide::prelude::*;
-
-const PANEL: &str = "\
-Admin panel
-
-/listusers - list users and roles
-/addadmin <telegram_id> - grant admin
-/demote <telegram_id> - revoke admin
-/block <telegram_id> - block a user
-/unblock <telegram_id> - unblock a user
-
-Only registered, unblocked users can use the bot at all. Active admins are the
-recipients for every alert.";
 
 pub async fn panel(state: AppState, msg: Message) -> HandlerResult {
     if reply::require_admin(&state.bot, &state.db, &msg)
@@ -34,7 +22,7 @@ pub async fn panel(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    reply::try_send(&state.bot, msg.chat.id, PANEL).await;
+    reply::try_send(&state.bot, msg.chat.id, copy::ADMIN_PANEL).await;
     Ok(())
 }
 
@@ -92,6 +80,10 @@ pub async fn add_admin(state: AppState, msg: Message, args: String) -> HandlerRe
 
 async fn promote(state: &AppState, msg: &Message, target: i64) -> Result<()> {
     let user = UserRepo::new(&state.db).upsert(target, Role::Admin).await?;
+
+    // So the new admin's command menu gains the admin entries without waiting for a
+    // restart.
+    menu::publish_for_admin(&state.bot, target, true).await;
 
     let note = if user.blocked {
         " They are still blocked — use /unblock to restore access."

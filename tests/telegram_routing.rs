@@ -56,7 +56,30 @@ async fn assert_reply_contains(text: &str, expected: &str) {
 
 #[tokio::test]
 async fn start_reaches_the_welcome_handler() {
-    assert_reply_contains("/start", "Welcome to ChainSentinel").await;
+    assert_reply_contains("/start", "ChainSentinel watches Solana").await;
+}
+
+#[tokio::test]
+async fn a_new_user_is_given_three_steps_not_a_command_dump() {
+    // Onboarding regression guard: the first message must tell someone what to press,
+    // not list every command.
+    assert_reply_contains("/start", "/addtoken").await;
+    assert_reply_contains("/start", "/addalert").await;
+}
+
+#[tokio::test]
+async fn help_explains_operators_with_worked_examples() {
+    assert_reply_contains("/help", "%down").await;
+    assert_reply_contains("/help", "e.g.").await;
+    // The three states /alerts can show must be looked up somewhere.
+    assert_reply_contains("/help", "armed").await;
+    assert_reply_contains("/help", "firing").await;
+}
+
+#[tokio::test]
+async fn help_states_the_scope_so_nobody_assumes_multi_chain() {
+    assert_reply_contains("/help", "Solana only").await;
+    assert_reply_contains("/help", "read-only").await;
 }
 
 #[tokio::test]
@@ -85,26 +108,37 @@ async fn admin_commands_reach_their_handlers() {
 
 #[tokio::test]
 async fn addtoken_starts_the_flow_rather_than_consuming_the_command() {
-    assert_reply_contains("/addtoken", "Send the SPL token mint address").await;
+    assert_reply_contains("/addtoken", "Which token?").await;
+}
+
+#[tokio::test]
+async fn prompts_show_a_real_example_of_what_to_paste() {
+    // "Send the SPL token mint address" assumes the user knows what one looks like.
+    assert_reply_contains("/addtoken", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").await;
+    assert_reply_contains("/addwallet", "never need a key").await;
 }
 
 #[tokio::test]
 async fn a_bad_id_argument_reports_usage_instead_of_generic_help() {
     // Previously `/enablerule abc` did not match the typed `i64` command branch at
     // all and fell through to the "use /help" fallback.
-    assert_reply_contains("/enablerule abc", "Usage: /enablerule <id>").await;
-    assert_reply_contains("/deleterule ", "Usage: /deleterule <id>").await;
-    assert_reply_contains("/deletetoken zero", "Usage: /deletetoken <id>").await;
+    assert_reply_contains("/enablerule abc", "/enablerule <id>").await;
+    assert_reply_contains("/deleterule ", "/deleterule <id>").await;
+    // And says where the number comes from, rather than leaving the user to guess.
+    assert_reply_contains("/deletetoken zero", "comes from the listing").await;
 }
 
 #[tokio::test]
 async fn plain_text_is_not_swallowed_by_a_flow() {
     // A bare base58 address with no flow active must not be treated as an answer.
-    assert_reply_contains(
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "I only understand commands",
-    )
-    .await;
+    assert_reply_contains("hello there", "I only take commands").await;
+}
+
+#[tokio::test]
+async fn a_pasted_address_is_answered_with_what_to_do_with_it() {
+    // Pasting an address is the most likely thing someone tries without a command;
+    // pointing them at the manual instead of the two relevant commands is a dead end.
+    assert_reply_contains("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "/addtoken").await;
 }
 
 #[tokio::test]
@@ -350,4 +384,88 @@ async fn blocking_a_user_takes_effect_mid_flow() {
             .is_empty(),
         "a blocked user must not be able to complete a flow they had already started"
     );
+}
+
+#[tokio::test]
+async fn the_command_menu_is_published_to_telegram() {
+    // This is what fills the `/` autocomplete list and the menu button. Without the
+    // `setMyCommands` call the bot has commands but no discoverable UI at all, which
+    // is how it shipped: the only way to find a command was to guess `/help`.
+    let mut server = mockito::Server::new_async().await;
+
+    let all_private = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]etMyCommands$".to_string()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("all_private_chats")),
+            Matcher::Regex(regex::escape(r#""command":"addalert""#)),
+            Matcher::Regex(regex::escape(r#""command":"addtoken""#)),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":true}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    // The seeded admin additionally gets the admin entries, scoped to their own chat.
+    let admin_scope = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]etMyCommands$".to_string()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape(r#""type":"chat""#)),
+            Matcher::Regex(regex::escape(r#""command":"listusers""#)),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(r#"{"ok":true,"result":true}"#)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db.clone(),
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    chainsentinel::telegram::menu::publish(&state.bot, &state.db).await;
+
+    all_private.assert_async().await;
+    admin_scope.assert_async().await;
+}
+
+#[tokio::test]
+async fn a_failed_menu_publish_is_not_fatal() {
+    // The menu is a convenience. A per-chat registration legitimately fails when the
+    // user has never opened a chat with the bot, and that must not break startup.
+    let mut server = mockito::Server::new_async().await;
+
+    let _failing = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]etMyCommands$".to_string()),
+        )
+        .with_status(400)
+        .with_body(r#"{"ok":false,"error_code":400,"description":"Bad Request"}"#)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db,
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    // Must simply return.
+    chainsentinel::telegram::menu::publish(&state.bot, &state.db).await;
 }

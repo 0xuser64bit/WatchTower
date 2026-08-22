@@ -7,24 +7,36 @@ evaluates your rules, and messages you when something crosses a line you drew.
 Single binary, SQLite, no web UI, no external services beyond the price API and a
 Solana RPC endpoint.
 
-## What it does
+## Scope
 
-- Tracks SPL tokens (by mint address) and wallets (by address).
-- Alerts on a token's USD price or a wallet's native SOL balance, using absolute
-  thresholds or percentage moves.
-- Delivers alerts to every active admin, with an audit trail you can read back.
-- Manages who is allowed to use the bot at all.
+**Solana only.** There is no multi-chain support and no abstraction waiting for one:
+prices come from CoinGecko's `solana` asset platform, and balances from a Solana
+JSON-RPC endpoint. Pointing it at another chain would mean a new provider, a new
+address format, and a new balance unit.
 
-## What it does not do
+Exactly two things can be watched:
 
-Stated plainly so nobody builds on an assumption:
+| You track | You can alert on | Unit |
+|---|---|---|
+| A token, by mint address | Its price | USD |
+| A wallet, by address | Its **native SOL** balance | SOL |
 
-- **No transactions.** It never holds a key, signs, or moves funds. It is read-only.
-- **No SPL token balances.** Balance rules cover the native SOL balance only.
-- **No transaction or account activity monitoring.** Only price and balance values.
-- **No multi-chain support.** Solana only.
-- **No multi-tenancy.** Every authorized user sees and edits the same directory of
-  targets and rules. It is a private tool for a small trusted group.
+with `>`, `<`, `>=`, `<=`, `%up`, `%down`.
+
+Everything else is deliberately absent:
+
+- **Read-only.** It never holds a key, signs, or moves funds.
+- **No SPL token balances.** A wallet rule watches its SOL balance, not its USDC.
+- **No transaction or activity monitoring.** Values only, sampled on an interval.
+- **No NFTs, no LP positions, no staking.**
+- **No multi-tenancy.** Every authorized user shares one set of targets and rules.
+  It is a private tool for a small trusted group.
+
+Limits worth knowing: values are sampled every `POLL_INTERVAL_SECONDS` (60 by
+default), so this is not a mempool watcher and will not catch a spike that comes and
+goes inside one interval. A token with no CoinGecko listing cannot be tracked at all,
+and `/addtoken` refuses it up front rather than letting you build an alert that can
+never fire.
 
 ## How alerting behaves
 
@@ -106,20 +118,52 @@ at a rule that may be gone.
 Anyone holding the bot token controls the bot. Treat `.env` as a credential file
 (`chmod 600`, owned by the service user).
 
-## Configuration
+## Setup
 
-Copy `.env.example` to `.env`. Only two values are required:
+Two values, five minutes.
+
+**1. Create the bot.** Message [@BotFather](https://t.me/BotFather), send
+`/newbot`, pick a name and a username. He replies with a token that looks like
+`8123456789:AAE...`. That token *is* the bot — anyone holding it controls it.
+
+**2. Find your Telegram ID.** Message [@userinfobot](https://t.me/userinfobot). It
+replies with a number. Not your @username — usernames can change, so the bot never
+trusts them.
+
+**3. Put both in `.env`.**
 
 ```bash
-TELEGRAM_BOT_TOKEN=   # from @BotFather
-ADMIN_TELEGRAM_IDS=   # your numeric Telegram ID, from @userinfobot
+cp .env.example .env
 ```
 
-Everything else has a working default; `.env.example` documents each one. Configuration
-is validated at startup and the daemon **refuses to start** on an invalid value rather
-than falling back silently.
+```bash
+TELEGRAM_BOT_TOKEN=8123456789:AAE...   # step 1
+ADMIN_TELEGRAM_IDS=123456789           # step 2
+```
 
-Two settings matter in production:
+**4. Start it, then message your bot `/start`.**
+
+```bash
+./scripts/ctl.sh start
+```
+
+That is the whole setup. Everything else has a working default, and `.env.example`
+documents each option with its range. Configuration is validated at startup: the daemon
+**refuses to start** on an invalid value and tells you which variable is wrong, rather
+than booting into a half-working state.
+
+Both required values are empty in `.env.example` on purpose. A plausible-looking
+placeholder would silently become a working configuration — the previous version
+shipped `ADMIN_TELEGRAM_IDS=123456789`, which would have granted a stranger control.
+
+### Using it
+
+The bot registers its commands with Telegram, so typing `/` shows a menu — you do not
+have to remember anything. `/start` gives a three-step path, `/help` has a worked
+example for every operator, and each guided flow asks one short question at a time with
+an example of the answer. `/cancel` gets you out of any of them.
+
+### Settings that matter in production
 
 - **`COINGECKO_API_KEY`** — the free unauthenticated tier rate-limits hard, and each
   poll costs one request per tracked token because CoinGecko's public tier accepts only
@@ -170,19 +214,20 @@ known operator, known state, no duplicate rules) is a `CHECK` or a unique index.
 **Rule state is persisted, not inferred.** Whether a rule is currently firing lives in
 the `rules` table, which is what makes edge-triggering survive a restart.
 
-## Running it
+## Running it locally
+
+See [Setup](#setup) for the two values you need first.
 
 ```bash
-cargo build --release
-cp .env.example .env   # then fill in the two required values
-./scripts/ctl.sh start
-./scripts/ctl.sh follow
+./scripts/ctl.sh start     # builds if needed, waits for a healthy startup
+./scripts/ctl.sh follow    # tail the log
 ```
 
-`./scripts/ctl.sh` also handles `stop`, `restart`, `status`, `logs`, and `reset`.
+Also `stop`, `restart`, `status`, `logs`, and `reset`. `start` does not return success
+until the daemon has authenticated with Telegram, so a bad token or a broken migration
+surfaces immediately instead of leaving a stale pid file behind.
 
-Message your bot `/start`. If nothing happens, check the log: startup authenticates
-with Telegram and reports exactly why it failed.
+If the bot does not answer `/start`, the log says why.
 
 ## Deploying on Ubuntu
 

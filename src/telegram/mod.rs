@@ -2,7 +2,9 @@
 
 pub mod auth;
 pub mod commands;
+pub mod copy;
 pub mod flows;
+pub mod menu;
 pub mod reply;
 
 use crate::app_state::AppState;
@@ -157,6 +159,10 @@ pub fn schema() -> UpdateHandler<HandlerError> {
 }
 
 pub async fn run(state: AppState) {
+    // Publishes the `/` autocomplete list. Without it the bot has commands but no
+    // discoverable UI, and a new user has to be told they exist.
+    menu::publish(&state.bot, &state.db).await;
+
     let state_shutdown = state.shutdown.clone();
 
     let mut dispatcher = Dispatcher::builder(state.bot.clone(), schema())

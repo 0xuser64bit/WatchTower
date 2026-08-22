@@ -85,6 +85,19 @@ batched; wallet balances can, via `getMultipleAccounts`.
 
 ## Chat output
 
+All multi-line copy lives in `telegram/copy.rs`, built with `concat!` of single-line
+literals. Do not use backslash line continuations for user-facing text: a continuation
+strips the next line's leading whitespace only when written exactly right, and getting
+it wrong bakes source indentation into the message with nothing to catch it. That
+happened once and shipped ragged prompts. The tests in that module assert no message has
+ragged indentation, trailing whitespace, a line over 72 characters, or a need to be
+split across two sends.
+
+Commands are published to Telegram with `setMyCommands` (`telegram/menu.rs`), which is
+what populates the `/` autocomplete list. A command added to the enum but not to the
+menu is invisible; a menu entry that does not parse is worse than none, so a test checks
+the two agree. Entries taking an id argument stay out of the tap-to-send menu.
+
 Plain text only. Telegram's Markdown modes would require escaping user-supplied labels
 and base58 addresses on every path, and one missed escape fails the send — which for an
 alert means it is not delivered.

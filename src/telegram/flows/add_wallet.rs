@@ -10,7 +10,7 @@ use crate::providers::solana::is_valid_address;
 use crate::telegram::flows::{
     is_affirmative, optional_answer, reprompt, text_of, FlowDialogue, HandlerResult,
 };
-use crate::telegram::reply;
+use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
@@ -50,12 +50,7 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
 }
 
 async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        "Send the Solana wallet address you want to track.\n\nSend /cancel to stop.",
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ASK_ADDRESS).await?;
 
     super::advance(dialogue, Step::AwaitingAddress).await?;
     Ok(())
@@ -72,16 +67,11 @@ async fn await_address_body(
     msg: &Message,
 ) -> Result<()> {
     let Some(address) = text_of(msg) else {
-        return reprompt(state, msg, "Send the wallet address as text.").await;
+        return reprompt(state, msg, "Paste the wallet address as text.").await;
     };
 
     if !is_valid_address(address) {
-        return reprompt(
-            state,
-            msg,
-            "That is not a valid Solana address. Addresses are 32-44 base58 characters.",
-        )
-        .await;
+        return reprompt(state, msg, copy::BAD_ADDRESS).await;
     }
 
     let address = address.to_string();
@@ -117,12 +107,7 @@ async fn await_address_body(
         }
     };
 
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("{intro}\n\nSend a label for this wallet, or `-` to skip."),
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ask_wallet_name(&intro)).await?;
 
     super::advance(dialogue, Step::AwaitingLabel { address }).await?;
     Ok(())
@@ -145,7 +130,7 @@ async fn await_label_body(
     address: String,
 ) -> Result<()> {
     let Some(raw) = text_of(msg) else {
-        return reprompt(state, msg, "Send a label as text, or `-` to skip.").await;
+        return reprompt(state, msg, copy::ASK_SHORT_NAME).await;
     };
 
     let label = optional_answer(raw);
@@ -159,10 +144,7 @@ async fn await_label_body(
     reply::send_text(
         &state.bot,
         msg.chat.id,
-        format!(
-            "Track this wallet?\n\nAddress: {address}\nLabel: {}\n\nReply `yes` to confirm, or /cancel.",
-            label.as_deref().unwrap_or("(none)")
-        ),
+        copy::confirm_wallet(label.as_deref().unwrap_or("(none)"), &address),
     )
     .await?;
 
@@ -188,7 +170,7 @@ async fn confirm_body(
 ) -> Result<()> {
     if !is_affirmative(text_of(msg)) {
         super::reset(dialogue).await;
-        return reprompt(state, msg, "Cancelled. Nothing was added.").await;
+        return reprompt(state, msg, copy::CANCELLED_NOTHING_ADDED).await;
     }
 
     match WalletRepo::new(&state.db)
@@ -199,11 +181,7 @@ async fn confirm_body(
             reply::send_text(
                 &state.bot,
                 msg.chat.id,
-                format!(
-                    "Tracking wallet {} — {}.\n\nUse /addalert to create a balance alert for it.",
-                    wallet.id,
-                    wallet.display()
-                ),
+                copy::wallet_saved(&wallet.display(), wallet.id),
             )
             .await?;
         }

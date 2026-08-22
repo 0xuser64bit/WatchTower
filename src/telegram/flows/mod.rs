@@ -122,11 +122,14 @@ pub fn text_of(msg: &Message) -> Option<&str> {
     msg.text().map(str::trim).filter(|text| !text.is_empty())
 }
 
-/// Interprets an optional free-text answer, where `-` means "skip".
+/// Interprets an answer to an optional question.
+///
+/// Accepts the words people actually type as well as the terse `-`, which nobody
+/// guesses on their own.
 pub fn optional_answer(raw: &str) -> Option<String> {
-    match raw {
-        "-" | "" => None,
-        other => Some(other.to_string()),
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "-" | "" | "skip" | "none" | "no" | "n/a" => None,
+        _ => Some(raw.trim().to_string()),
     }
 }
 
@@ -164,9 +167,11 @@ mod tests {
     }
 
     #[test]
-    fn dash_means_skip() {
-        assert_eq!(optional_answer("-"), None);
-        assert_eq!(optional_answer(""), None);
+    fn optional_questions_accept_words_as_well_as_a_dash() {
+        for skip in ["-", "", "skip", "Skip", "none", "NONE", "no"] {
+            assert_eq!(optional_answer(skip), None, "{skip:?}");
+        }
         assert_eq!(optional_answer("Treasury"), Some("Treasury".to_string()));
+        assert_eq!(optional_answer("  USDC  "), Some("USDC".to_string()));
     }
 }

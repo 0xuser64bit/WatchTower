@@ -13,7 +13,7 @@ use crate::db::repos::wallets::WalletRepo;
 use crate::error::Result;
 use crate::rules::types::{Operator, TargetKind};
 use crate::telegram::flows::{is_affirmative, reprompt, text_of, FlowDialogue, HandlerResult};
-use crate::telegram::reply;
+use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 
@@ -100,23 +100,14 @@ async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) ->
     let wallets = WalletRepo::new(&state.db).count().await?;
 
     if tokens == 0 && wallets == 0 {
-        reply::send_text(
-            &state.bot,
-            msg.chat.id,
-            "Nothing is tracked yet. Add a target first with /addtoken or /addwallet.",
-        )
-        .await?;
+        reply::send_text(&state.bot, msg.chat.id, copy::NOTHING_TO_ALERT_ON).await?;
         return Ok(());
     }
 
     reply::send_text(
         &state.bot,
         msg.chat.id,
-        format!(
-            "What should this alert watch?\n\
-             Send `token` for a token price ({tokens} tracked) or `wallet` for a SOL balance \
-             ({wallets} tracked).\n\nSend /cancel to stop."
-        ),
+        copy::ask_alert_kind(tokens, wallets),
     )
     .await?;
 
@@ -133,7 +124,7 @@ async fn await_kind_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
     let kind = match text_of(msg).map(|text| text.to_ascii_lowercase()) {
         Some(text) if text == "token" => TargetKind::Token,
         Some(text) if text == "wallet" => TargetKind::Wallet,
-        _ => return reprompt(state, msg, "Send `token` or `wallet`.").await,
+        _ => return reprompt(state, msg, copy::BAD_ALERT_KIND).await,
     };
 
     let listing = match kind {
@@ -180,12 +171,7 @@ async fn await_kind_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
         return Ok(());
     }
 
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("Which one? Send its number.\n\n{}", listing.join("\n")),
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ask_which_target(&listing)).await?;
 
     super::advance(dialogue, Step::AwaitingTarget { kind }).await?;
     Ok(())
@@ -208,7 +194,7 @@ async fn await_target_body(
     kind: TargetKind,
 ) -> Result<()> {
     let Some(target_id) = text_of(msg).and_then(|text| text.parse::<i64>().ok()) else {
-        return reprompt(state, msg, "Send the number shown next to the target.").await;
+        return reprompt(state, msg, copy::BAD_TARGET_NUMBER).await;
     };
 
     // Resolve now so a rule can never be created against a target that does not
@@ -227,19 +213,15 @@ async fn await_target_body(
         .await;
     }
 
-    let unit = kind.unit();
+    let (unit, subject, example_high, example_low) = match kind {
+        TargetKind::Token => ("USD", "price", "250", "0.99"),
+        TargetKind::Wallet => ("SOL", "balance", "100", "5"),
+    };
+
     reply::send_text(
         &state.bot,
         msg.chat.id,
-        format!(
-            "How should it be compared?\n\n\
-             `>`  above a {unit} value\n\
-             `<`  below a {unit} value\n\
-             `>=` at or above a {unit} value\n\
-             `<=` at or below a {unit} value\n\
-             `%up`   rose by a percentage\n\
-             `%down` fell by a percentage"
-        ),
+        copy::ask_operator(subject, unit, example_high, example_low),
     )
     .await?;
 
@@ -264,18 +246,18 @@ async fn await_operator_body(
     (kind, target_id): (TargetKind, i64),
 ) -> Result<()> {
     let Some(operator) = text_of(msg).and_then(Operator::parse) else {
-        return reprompt(state, msg, "Send one of: >, <, >=, <=, %up, %down.").await;
+        return reprompt(state, msg, copy::BAD_OPERATOR).await;
     };
 
     let prompt = if operator.is_percentage() {
-        "Send the percentage change that should trigger the alert, for example `10` for 10%.\n\n\
-         The baseline is the first value observed after the rule is created, and it re-baselines \
-         each time the alert fires."
-            .to_string()
+        copy::ASK_PERCENT.to_string()
     } else {
-        format!(
-            "Send the {} threshold as a number, for example `1.5`.",
-            kind.unit()
+        copy::ask_threshold(
+            match kind {
+                TargetKind::Token => "1.5",
+                TargetKind::Wallet => "5",
+            },
+            kind.unit(),
         )
     };
 
@@ -315,36 +297,15 @@ async fn await_threshold_body(
         .filter(|value| value.is_finite() && *value > 0.0);
 
     let Some(threshold) = threshold else {
-        return reprompt(
-            state,
-            msg,
-            "Send a positive number. Use `%down 10` style percentages as just `10`.",
-        )
-        .await;
+        return reprompt(state, msg, copy::BAD_THRESHOLD).await;
     };
 
     if operator.is_percentage() && threshold > 1000.0 {
-        return reprompt(
-            state,
-            msg,
-            "Percentage thresholds above 1000% are rejected as typos.",
-        )
-        .await;
+        return reprompt(state, msg, copy::THRESHOLD_TOO_BIG).await;
     }
 
     let default = state.settings.alert_default_cooldown_seconds;
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!(
-            "Minimum seconds between repeat alerts for this rule?\n\n\
-             Send a number, or `-` to use the configured default of {default}s.\n\n\
-             Note: an alert fires when the condition becomes true and then stays quiet \
-             until the condition clears, so this only limits a condition that keeps \
-             flipping back and forth."
-        ),
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, copy::ask_cooldown(default)).await?;
 
     super::advance(
         dialogue,
@@ -382,28 +343,17 @@ async fn await_cooldown_body(
     (kind, target_id, operator, threshold): (TargetKind, i64, Operator, f64),
 ) -> Result<()> {
     let Some(raw) = text_of(msg) else {
-        return reprompt(
-            state,
-            msg,
-            "Send a number of seconds, or `-` for the default.",
-        )
-        .await;
+        return reprompt(state, msg, copy::BAD_COOLDOWN).await;
     };
 
-    let cooldown_seconds =
-        if raw == "-" {
-            state.settings.alert_default_cooldown_seconds
-        } else {
-            match raw.parse::<i64>() {
-                Ok(value) if (0..=86_400).contains(&value) => value,
-                _ => return reprompt(
-                    state,
-                    msg,
-                    "Send a whole number of seconds between 0 and 86400, or `-` for the default.",
-                )
-                .await,
-            }
-        };
+    // `skip`, `none` and `-` all mean "use the configured default".
+    let cooldown_seconds = match super::optional_answer(raw) {
+        None => state.settings.alert_default_cooldown_seconds,
+        Some(answer) => match answer.parse::<i64>() {
+            Ok(value) if (0..=86_400).contains(&value) => value,
+            _ => return reprompt(state, msg, copy::BAD_COOLDOWN).await,
+        },
+    };
 
     let summary = describe(
         state,
@@ -415,12 +365,7 @@ async fn await_cooldown_body(
     )
     .await?;
 
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("Create this alert?\n\n{summary}\n\nReply `yes` to confirm, or /cancel."),
-    )
-    .await?;
+    reply::send_text(&state.bot, msg.chat.id, summary).await?;
 
     super::advance(
         dialogue,
@@ -460,7 +405,7 @@ async fn confirm_body(
 ) -> Result<()> {
     if !is_affirmative(text_of(msg)) {
         super::reset(dialogue).await;
-        return reprompt(state, msg, "Cancelled. No alert was created.").await;
+        return reprompt(state, msg, copy::CANCELLED_NO_ALERT).await;
     }
 
     let target = match kind {
@@ -476,11 +421,11 @@ async fn confirm_body(
             reply::send_text(
                 &state.bot,
                 msg.chat.id,
-                format!(
-                    "Alert {} created: {} {}.\n\nIt is active now. Use /alerts to review.",
+                copy::alert_saved(
                     rule.id,
-                    rule.target.display(),
-                    rule.condition()
+                    &rule.target.display(),
+                    &rule.condition(),
+                    state.settings.poll_interval.as_secs(),
                 ),
             )
             .await?;
@@ -529,7 +474,5 @@ async fn describe(
         )
     };
 
-    Ok(format!(
-        "Target: {target}\nCondition: {condition}\nCooldown: {cooldown_seconds}s"
-    ))
+    Ok(copy::confirm_alert(&target, &condition, cooldown_seconds))
 }
