@@ -25,7 +25,7 @@ pub struct LoggingGuard {
 pub fn init(log_dir: &str, max_files: usize) -> LoggingGuard {
     let filter = EnvFilter::try_from_default_env()
         // teloxide and sqlx are noisy at debug; default to our own crate at info.
-        .unwrap_or_else(|_| EnvFilter::new("info,chainsentinel=info"));
+        .unwrap_or_else(|_| EnvFilter::new("info,watchtower=info"));
 
     let stdout_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
@@ -67,7 +67,7 @@ fn build_file_layer(log_dir: &str, max_files: usize) -> std::io::Result<(BoxedLa
 
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
-        .filename_prefix("chainsentinel")
+        .filename_prefix("watchtower")
         .filename_suffix("log")
         .max_log_files(max_files)
         .build(log_dir)

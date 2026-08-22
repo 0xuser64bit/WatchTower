@@ -1,4 +1,4 @@
-//! ChainSentinel: a private Telegram-controlled Solana monitoring daemon.
+//! WatchTower: a private Telegram-controlled Solana monitoring daemon.
 //!
 //! Two long-running halves share [`app_state::AppState`]:
 //!

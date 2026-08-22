@@ -194,29 +194,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "chainsentinel"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "bs58",
- "chrono",
- "dotenvy",
- "mockito",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "sqlx",
- "teloxide",
- "thiserror",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3008,6 +2985,29 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+]
+
+[[package]]
+name = "watchtower"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "bs58",
+ "chrono",
+ "dotenvy",
+ "mockito",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "teloxide",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
 ]
 
 [[package]]

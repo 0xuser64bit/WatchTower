@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Local process control for ChainSentinel.
+# Local process control for WatchTower.
 #
 # For running the daemon on a workstation. On a server use the systemd unit in
 # `deploy/`, which supervises restarts and applies sandboxing this script cannot.
@@ -16,11 +16,11 @@ ENV_FILE="${ROOT}/.env"
 ENV_EXAMPLE="${ROOT}/.env.example"
 DATA_DIR="${ROOT}/data"
 LOG_DIR="${ROOT}/logs"
-PID_FILE="${DATA_DIR}/chainsentinel.pid"
+PID_FILE="${DATA_DIR}/watchtower.pid"
 # The daemon logs to stdout as well as to its rolling files, so capturing stdout gives
 # one complete log including anything emitted before file logging is initialised.
-OUT_LOG="${LOG_DIR}/chainsentinel.out"
-BIN="${ROOT}/target/release/chainsentinel"
+OUT_LOG="${LOG_DIR}/watchtower.out"
+BIN="${ROOT}/target/release/watchtower"
 
 die() {
     echo "error: $*" >&2
@@ -158,7 +158,7 @@ cmd_reset() {
 
 usage() {
     cat <<'USAGE'
-ChainSentinel local process control
+WatchTower local process control
 
   start     build if needed, start in the background, wait for a healthy startup
   stop      graceful shutdown (SIGTERM), escalating to SIGKILL after 30s
@@ -168,7 +168,7 @@ ChainSentinel local process control
   follow    tail the log
   reset     delete the local database after confirmation
 
-On a server, use deploy/chainsentinel.service instead.
+On a server, use deploy/watchtower.service instead.
 USAGE
 }
 

@@ -1,5 +1,5 @@
 [package]
-name = "chainsentinel"
+name = "watchtower"
 version = "0.2.0"
 edition = "2021"
 description = "Private Telegram-controlled Solana monitoring and alerting platform"

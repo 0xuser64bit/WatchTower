@@ -96,7 +96,7 @@ impl Settings {
             telegram_bot_token: Secret(required(env, "TELEGRAM_BOT_TOKEN")?),
             admin_telegram_ids: parse_admin_ids(&required(env, "ADMIN_TELEGRAM_IDS")?)?,
             database_url: optional(env, "DATABASE_URL")
-                .unwrap_or_else(|| "sqlite://data/chainsentinel.db".to_string()),
+                .unwrap_or_else(|| "sqlite://data/watchtower.db".to_string()),
             coingecko_api_urls: parse_urls(
                 "COINGECKO_API_URLS",
                 optional(env, "COINGECKO_API_URLS")
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(settings.poll_interval, Duration::from_secs(60));
         assert_eq!(settings.solana_rpc_commitment, Commitment::Confirmed);
         assert_eq!(settings.alert_default_cooldown_seconds, 300);
-        assert_eq!(settings.database_url, "sqlite://data/chainsentinel.db");
+        assert_eq!(settings.database_url, "sqlite://data/watchtower.db");
         assert_eq!(
             settings.coingecko_api_urls,
             vec!["https://api.coingecko.com/api/v3"]

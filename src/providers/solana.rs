@@ -77,7 +77,7 @@ impl SolanaRpcProvider {
 
         let client = Client::builder()
             .timeout(timeout)
-            .user_agent(concat!("chainsentinel/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("watchtower/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(ProviderError::Http)?;
 

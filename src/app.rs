@@ -32,8 +32,8 @@ pub fn main() -> std::process::ExitCode {
     let settings = match Settings::load() {
         Ok(settings) => settings,
         Err(err) => {
-            eprintln!("chainsentinel: configuration error: {err}");
-            eprintln!("chainsentinel: see .env.example for the expected variables");
+            eprintln!("watchtower: configuration error: {err}");
+            eprintln!("watchtower: see .env.example for the expected variables");
             return std::process::ExitCode::FAILURE;
         }
     };
@@ -55,7 +55,7 @@ pub fn main() -> std::process::ExitCode {
         Ok(Stop::Signal) => std::process::ExitCode::SUCCESS,
         Ok(Stop::TaskFailed) => std::process::ExitCode::FAILURE,
         Err(err) => {
-            error!(%err, "chainsentinel failed to start");
+            error!(%err, "watchtower failed to start");
             std::process::ExitCode::FAILURE
         }
     }
@@ -68,7 +68,7 @@ async fn run(settings: Settings) -> Result<Stop> {
         rpc_endpoints = settings.solana_rpc_endpoints.len(),
         price_endpoints = settings.coingecko_api_urls.len(),
         commitment = settings.solana_rpc_commitment.as_str(),
-        "starting ChainSentinel"
+        "starting WatchTower"
     );
 
     let db = Db::connect(&settings.database_url).await?;
@@ -138,7 +138,7 @@ async fn run(settings: Settings) -> Result<Stop> {
     }
     db.close().await;
 
-    info!(?stop, "ChainSentinel stopped");
+    info!(?stop, "WatchTower stopped");
     Ok(stop)
 }
 
