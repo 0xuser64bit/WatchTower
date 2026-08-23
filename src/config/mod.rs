@@ -4,6 +4,13 @@
 //! from a `.env` file). Parsing is pure and testable: [`Settings::from_env_map`]
 //! takes a plain map so the whole surface can be exercised without mutating global
 //! process state.
+//!
+//! Operator-facing copy, defaults, and wizard metadata live in [`fields`]. The
+//! parser reads defaults from that catalog so the two cannot drift.
+
+mod fields;
+
+pub use fields::{FieldSpec, FieldTier, FIELD_CATALOG};
 
 use std::collections::HashMap;
 use std::fmt;
@@ -96,49 +103,57 @@ impl Settings {
             telegram_bot_token: Secret(required(env, "TELEGRAM_BOT_TOKEN")?),
             admin_telegram_ids: parse_admin_ids(&required(env, "ADMIN_TELEGRAM_IDS")?)?,
             database_url: optional(env, "DATABASE_URL")
-                .unwrap_or_else(|| "sqlite://data/watchtower.db".to_string()),
+                .unwrap_or_else(|| FieldSpec::default_value("DATABASE_URL").to_string()),
             coingecko_api_urls: parse_urls(
                 "COINGECKO_API_URLS",
                 optional(env, "COINGECKO_API_URLS")
                     .as_deref()
-                    .unwrap_or("https://api.coingecko.com/api/v3"),
+                    .unwrap_or_else(|| FieldSpec::default_value("COINGECKO_API_URLS")),
             )?,
             coingecko_api_key: optional(env, "COINGECKO_API_KEY").map(Secret),
             solana_rpc_endpoints: parse_urls(
                 "SOLANA_RPC_ENDPOINTS",
                 optional(env, "SOLANA_RPC_ENDPOINTS")
                     .as_deref()
-                    .unwrap_or("https://api.mainnet-beta.solana.com"),
+                    .unwrap_or_else(|| FieldSpec::default_value("SOLANA_RPC_ENDPOINTS")),
             )?,
             solana_rpc_commitment: parse_commitment(
                 optional(env, "SOLANA_RPC_COMMITMENT")
                     .as_deref()
-                    .unwrap_or("confirmed"),
+                    .unwrap_or_else(|| FieldSpec::default_value("SOLANA_RPC_COMMITMENT")),
             )?,
             poll_interval: Duration::from_secs(parse_num(
                 env,
                 "POLL_INTERVAL_SECONDS",
-                60,
+                catalog_u64("POLL_INTERVAL_SECONDS"),
                 MIN_POLL_INTERVAL_SECONDS,
                 MAX_POLL_INTERVAL_SECONDS,
             )?),
-            http_timeout: Duration::from_secs(parse_num(env, "HTTP_TIMEOUT_SECONDS", 10, 1, 120)?),
+            http_timeout: Duration::from_secs(parse_num(
+                env,
+                "HTTP_TIMEOUT_SECONDS",
+                catalog_u64("HTTP_TIMEOUT_SECONDS"),
+                1,
+                120,
+            )?),
             alert_default_cooldown_seconds: parse_num(
                 env,
                 "ALERT_DEFAULT_COOLDOWN_SECONDS",
-                300,
+                catalog_i64("ALERT_DEFAULT_COOLDOWN_SECONDS"),
                 0,
                 86_400,
             )?,
             alert_history_retention_days: parse_num(
                 env,
                 "ALERT_HISTORY_RETENTION_DAYS",
-                90,
+                catalog_i64("ALERT_HISTORY_RETENTION_DAYS"),
                 1,
                 3_650,
             )?,
-            log_dir: optional(env, "LOG_DIR").unwrap_or_else(|| "logs".to_string()),
-            log_max_files: parse_num(env, "LOG_MAX_FILES", 14, 1, 365)? as usize,
+            log_dir: optional(env, "LOG_DIR")
+                .unwrap_or_else(|| FieldSpec::default_value("LOG_DIR").to_string()),
+            log_max_files: parse_num(env, "LOG_MAX_FILES", catalog_u64("LOG_MAX_FILES"), 1, 365)?
+                as usize,
         };
 
         settings.validate()?;
@@ -148,13 +163,7 @@ impl Settings {
     fn validate(&self) -> Result<()> {
         // Reject placeholders and obvious typos before the process starts long-polling
         // with a token Telegram will reject.
-        let token = self.telegram_bot_token.expose();
-        if token == "replace_me" || !token.contains(':') || token.len() < 20 {
-            return Err(ConfigError::Invalid {
-                key: "TELEGRAM_BOT_TOKEN",
-                reason: "expected a token in the form <bot_id>:<secret> from @BotFather".into(),
-            });
-        }
+        validate_telegram_bot_token(self.telegram_bot_token.expose())?;
 
         if !self.database_url.starts_with("sqlite:") {
             return Err(ConfigError::Invalid {
@@ -172,6 +181,28 @@ impl Settings {
 
         Ok(())
     }
+}
+
+fn catalog_u64(key: &str) -> u64 {
+    FieldSpec::default_value(key)
+        .parse()
+        .unwrap_or_else(|_| panic!("config catalog: {key} default is not a u64"))
+}
+
+fn catalog_i64(key: &str) -> i64 {
+    FieldSpec::default_value(key)
+        .parse()
+        .unwrap_or_else(|_| panic!("config catalog: {key} default is not an i64"))
+}
+
+pub(crate) fn validate_telegram_bot_token(token: &str) -> Result<()> {
+    if token == "replace_me" || !token.contains(':') || token.len() < 20 {
+        return Err(ConfigError::Invalid {
+            key: "TELEGRAM_BOT_TOKEN",
+            reason: "expected a token in the form <bot_id>:<secret> from @BotFather".into(),
+        });
+    }
+    Ok(())
 }
 
 fn optional(env: &HashMap<String, String>, key: &str) -> Option<String> {
@@ -213,7 +244,7 @@ where
     Ok(value)
 }
 
-fn parse_admin_ids(raw: &str) -> Result<Vec<i64>> {
+pub(crate) fn parse_admin_ids(raw: &str) -> Result<Vec<i64>> {
     let mut ids = Vec::new();
 
     for part in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -244,7 +275,7 @@ fn parse_admin_ids(raw: &str) -> Result<Vec<i64>> {
     Ok(ids)
 }
 
-fn parse_urls(key: &'static str, raw: &str) -> Result<Vec<String>> {
+pub(crate) fn parse_urls(key: &'static str, raw: &str) -> Result<Vec<String>> {
     let mut urls = Vec::new();
 
     for part in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -271,7 +302,7 @@ fn parse_urls(key: &'static str, raw: &str) -> Result<Vec<String>> {
     Ok(urls)
 }
 
-fn parse_commitment(raw: &str) -> Result<Commitment> {
+pub(crate) fn parse_commitment(raw: &str) -> Result<Commitment> {
     match raw {
         "processed" => Ok(Commitment::Processed),
         "confirmed" => Ok(Commitment::Confirmed),

@@ -68,7 +68,18 @@ remains readable after a rule or target is deleted.
 
 ## Configuration
 
-Copy the checked-in example and set the two required values:
+The fastest path is the setup wizard. It explains each variable, live-checks the
+bot token and providers, and writes `.env` with mode `600`:
+
+```bash
+./scripts/ctl.sh setup
+# or: cargo run --release -- setup
+```
+
+If you start the daemon with missing required values on a terminal, it offers to
+run the same wizard. Non-interactive hosts print `run: watchtower setup` and exit.
+
+To configure by hand instead:
 
 ```bash
 cp .env.example .env
@@ -80,7 +91,7 @@ ADMIN_TELEGRAM_IDS=123456789
 ```
 
 All other settings are optional and validated at startup. The complete list, defaults,
-limits, and provider notes live in [.env.example](.env.example).
+limits, and provider notes live in [.env.example](.env.example) and in the wizard itself.
 
 Important production settings:
 
@@ -105,6 +116,7 @@ The control script builds a release binary when needed and manages a local proce
 database, and logs:
 
 ```bash
+./scripts/ctl.sh setup
 ./scripts/ctl.sh start
 ./scripts/ctl.sh status
 ./scripts/ctl.sh follow

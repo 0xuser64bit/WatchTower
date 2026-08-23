@@ -26,18 +26,9 @@ enum Stop {
     TaskFailed,
 }
 
-pub fn main() -> std::process::ExitCode {
-    // Configuration is read before logging is initialised, so failures here have to
-    // go to stderr directly.
-    let settings = match Settings::load() {
-        Ok(settings) => settings,
-        Err(err) => {
-            eprintln!("watchtower: configuration error: {err}");
-            eprintln!("watchtower: see .env.example for the expected variables");
-            return std::process::ExitCode::FAILURE;
-        }
-    };
-
+/// Run the daemon with already-loaded settings. CLI routing and setup recovery
+/// happen in [`crate::cli`] before this is called.
+pub fn run(settings: Settings) -> std::process::ExitCode {
     let _logging = observability::init(&settings.log_dir, settings.log_max_files);
 
     let runtime = match tokio::runtime::Builder::new_multi_thread()
@@ -51,7 +42,7 @@ pub fn main() -> std::process::ExitCode {
         }
     };
 
-    match runtime.block_on(run(settings)) {
+    match runtime.block_on(run_loop(settings)) {
         Ok(Stop::Signal) => std::process::ExitCode::SUCCESS,
         Ok(Stop::TaskFailed) => std::process::ExitCode::FAILURE,
         Err(err) => {
@@ -61,7 +52,7 @@ pub fn main() -> std::process::ExitCode {
     }
 }
 
-async fn run(settings: Settings) -> Result<Stop> {
+async fn run_loop(settings: Settings) -> Result<Stop> {
     info!(
         version = env!("CARGO_PKG_VERSION"),
         poll_interval_secs = settings.poll_interval.as_secs(),

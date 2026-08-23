@@ -5,7 +5,7 @@
 # For running the daemon on a workstation. On a server use the systemd unit in
 # `deploy/`, which supervises restarts and applies sandboxing this script cannot.
 #
-#   ./scripts/ctl.sh start|stop|restart|status|logs|follow|reset
+#   ./scripts/ctl.sh start|setup|stop|restart|status|logs|follow|reset
 
 set -euo pipefail
 
@@ -13,7 +13,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 ENV_FILE="${ROOT}/.env"
-ENV_EXAMPLE="${ROOT}/.env.example"
 DATA_DIR="${ROOT}/data"
 LOG_DIR="${ROOT}/logs"
 PID_FILE="${DATA_DIR}/watchtower.pid"
@@ -37,18 +36,35 @@ is_running() {
     [[ -n "${pid}" ]] && kill -0 "${pid}" 2>/dev/null
 }
 
-require_env() {
-    [[ -f "${ENV_FILE}" ]] || {
-        cp "${ENV_EXAMPLE}" "${ENV_FILE}"
-        die "created ${ENV_FILE} from the example. Set TELEGRAM_BOT_TOKEN and ADMIN_TELEGRAM_IDS, then start again."
+ensure_bin() {
+    [[ -x "${BIN}" ]] || {
+        echo "building release binary..."
+        cargo build --release
     }
+}
 
-    # Only a presence check. The daemon validates the format and rejects the
-    # placeholder itself, so there is one source of truth for what is valid.
-    grep -Eq '^[[:space:]]*TELEGRAM_BOT_TOKEN=.+' "${ENV_FILE}" \
-        || die "TELEGRAM_BOT_TOKEN is empty in ${ENV_FILE}"
-    grep -Eq '^[[:space:]]*ADMIN_TELEGRAM_IDS=.+' "${ENV_FILE}" \
-        || die "ADMIN_TELEGRAM_IDS is empty in ${ENV_FILE}"
+require_env() {
+    local missing=0
+    if [[ ! -f "${ENV_FILE}" ]]; then
+        missing=1
+    elif ! grep -Eq '^[[:space:]]*TELEGRAM_BOT_TOKEN=.+' "${ENV_FILE}" \
+        || ! grep -Eq '^[[:space:]]*ADMIN_TELEGRAM_IDS=.+' "${ENV_FILE}"; then
+        missing=1
+    fi
+
+    if (( missing )); then
+        if [[ -t 0 && -t 1 ]]; then
+            echo "configuration missing; launching setup..."
+            cmd_setup || die "setup did not complete"
+        else
+            die "configuration missing. Run: ./scripts/ctl.sh setup"
+        fi
+    fi
+}
+
+cmd_setup() {
+    ensure_bin
+    "${BIN}" setup
 }
 
 cmd_start() {
@@ -60,10 +76,7 @@ cmd_start() {
     require_env
     mkdir -p "${DATA_DIR}" "${LOG_DIR}"
 
-    [[ -x "${BIN}" ]] || {
-        echo "building release binary..."
-        cargo build --release
-    }
+    ensure_bin
 
     echo "starting..."
     nohup "${BIN}" >>"${OUT_LOG}" 2>&1 &
@@ -161,6 +174,7 @@ usage() {
 WatchTower local process control
 
   start     build if needed, start in the background, wait for a healthy startup
+  setup     interactive configuration wizard; writes .env
   stop      graceful shutdown (SIGTERM), escalating to SIGKILL after 30s
   restart   stop then start
   status    whether the process is running and where its files are
@@ -174,6 +188,7 @@ USAGE
 
 case "${1:-}" in
 start) cmd_start ;;
+setup) cmd_setup ;;
 stop) cmd_stop ;;
 restart)
     cmd_stop

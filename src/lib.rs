@@ -13,6 +13,7 @@
 pub mod alerts;
 pub mod app;
 pub mod app_state;
+pub mod cli;
 pub mod config;
 pub mod db;
 pub mod engine;
@@ -20,4 +21,5 @@ pub mod error;
 pub mod observability;
 pub mod providers;
 pub mod rules;
+pub mod setup;
 pub mod telegram;
