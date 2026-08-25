@@ -1,18 +1,22 @@
 //! Guided wallet tracking.
 //!
 //! The address is checked on chain before the wallet is stored, so the user sees the
-//! real balance and immediately notices a mistyped address.
+//! real balance and immediately notices a mistyped address. Naming and confirmation
+//! are tappable; the address is pasted as text.
 
 use crate::app_state::AppState;
 use crate::db::repos::wallets::WalletRepo;
 use crate::error::Result;
 use crate::providers::solana::is_valid_address;
+use crate::telegram::callback::{CANCEL, MAIN};
 use crate::telegram::flows::{
-    is_affirmative, optional_answer, reprompt, text_of, FlowDialogue, HandlerResult,
+    is_affirmative, optional_answer, reprompt, text_of, DialogueState, FlowDialogue, HandlerResult,
 };
+use crate::telegram::ui::{self, button, Screen, Surface};
 use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
+use teloxide::types::CallbackQuery;
 
 const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
 
@@ -45,14 +49,52 @@ pub async fn start(state: AppState, dialogue: FlowDialogue, msg: Message) -> Han
         return Ok(());
     }
 
-    let outcome = start_body(&state, &dialogue, &msg).await;
+    let outcome = start_on(&state, &dialogue, Surface::New(msg.chat.id)).await;
     reply::finish(&state.bot, msg.chat.id, "add_wallet.start", outcome).await
 }
 
-async fn start_body(state: &AppState, dialogue: &FlowDialogue, msg: &Message) -> Result<()> {
-    reply::send_text(&state.bot, msg.chat.id, copy::ASK_ADDRESS).await?;
-
+pub async fn start_on(state: &AppState, dialogue: &FlowDialogue, surface: Surface) -> Result<()> {
     super::advance(dialogue, Step::AwaitingAddress).await?;
+    ui::render(
+        &state.bot,
+        surface,
+        Screen::new(copy::ASK_ADDRESS, vec![vec![button("✕ Cancel", CANCEL)]]),
+    )
+    .await
+}
+
+pub async fn on_callback(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    current: DialogueState,
+    surface: Surface,
+    q: &CallbackQuery,
+    rest: &[&str],
+) -> Result<()> {
+    match rest {
+        ["sk"] => {
+            let DialogueState::AddWallet(Step::AwaitingLabel { address }) = current else {
+                return expired(state, q).await;
+            };
+            present_confirm(state, dialogue, surface, address, None).await
+        }
+        ["ok"] => {
+            let DialogueState::AddWallet(Step::Confirming { address, label }) = current else {
+                return expired(state, q).await;
+            };
+            create(state, dialogue, surface, address, label).await
+        }
+        _ => expired(state, q).await,
+    }
+}
+
+async fn expired(state: &AppState, q: &CallbackQuery) -> Result<()> {
+    ui::toast(
+        &state.bot,
+        q.id.clone(),
+        "That step has moved on. Send /menu to start over.",
+    )
+    .await;
     Ok(())
 }
 
@@ -75,20 +117,20 @@ async fn await_address_body(
     }
 
     let address = address.to_string();
+    let surface = Surface::New(msg.chat.id);
 
     if let Some(existing) = WalletRepo::new(&state.db).find_by_address(&address).await? {
-        reply::send_text(
+        super::reset(dialogue).await;
+        let name = existing.label.as_deref().unwrap_or("unnamed");
+        return ui::render(
             &state.bot,
-            msg.chat.id,
-            format!(
-                "Already tracked as wallet {} ({}).",
-                existing.id,
-                existing.label.as_deref().unwrap_or("no label")
+            surface,
+            Screen::new(
+                format!("Already tracking <b>{}</b>.", ui::esc(name)),
+                vec![vec![button("👛 Wallets", "wl"), button("🏠 Menu", MAIN)]],
             ),
         )
-        .await?;
-        super::reset(dialogue).await;
-        return Ok(());
+        .await;
     }
 
     let balance = state
@@ -103,14 +145,29 @@ async fn await_address_body(
         ),
         Err(err) => {
             tracing::warn!(%address, %err, "could not read wallet balance while adding");
-            "Could not reach a Solana RPC endpoint to verify it right now.".to_string()
+            "Couldn't reach a Solana RPC endpoint to verify it right now.".to_string()
         }
     };
 
-    reply::send_text(&state.bot, msg.chat.id, copy::ask_wallet_name(&intro)).await?;
+    present_label(state, dialogue, surface, address, intro).await
+}
+
+async fn present_label(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    surface: Surface,
+    address: String,
+    intro: String,
+) -> Result<()> {
+    let rows = vec![vec![button("Skip", "aw:sk"), button("✕ Cancel", CANCEL)]];
 
     super::advance(dialogue, Step::AwaitingLabel { address }).await?;
-    Ok(())
+    ui::render(
+        &state.bot,
+        surface,
+        Screen::new(copy::ask_wallet_name(&intro), rows),
+    )
+    .await
 }
 
 async fn await_label(
@@ -141,15 +198,33 @@ async fn await_label_body(
         }
     }
 
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        copy::confirm_wallet(label.as_deref().unwrap_or("(none)"), &address),
-    )
-    .await?;
+    present_confirm(state, dialogue, Surface::New(msg.chat.id), address, label).await
+}
+
+async fn present_confirm(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    surface: Surface,
+    address: String,
+    label: Option<String>,
+) -> Result<()> {
+    let text = format!(
+        concat!(
+            "<b>Track this wallet?</b>\n",
+            "\n",
+            "<b>Name:</b> {0}\n",
+            "<b>Address:</b>\n{1}"
+        ),
+        ui::esc(label.as_deref().unwrap_or("(none)")),
+        ui::code(&address)
+    );
+    let rows = vec![
+        vec![button("✅ Add Wallet", "aw:ok")],
+        vec![button("✕ Cancel", CANCEL)],
+    ];
 
     super::advance(dialogue, Step::Confirming { address, label }).await?;
-    Ok(())
+    ui::render(&state.bot, surface, Screen::new(text, rows)).await
 }
 
 async fn confirm(
@@ -158,36 +233,48 @@ async fn confirm(
     msg: Message,
     (address, label): (String, Option<String>),
 ) -> HandlerResult {
-    let outcome = confirm_body(&state, &dialogue, &msg, (address, label)).await;
+    let outcome = if is_affirmative(text_of(&msg)) {
+        create(&state, &dialogue, Surface::New(msg.chat.id), address, label).await
+    } else {
+        super::reset(&dialogue).await;
+        reprompt(&state, &msg, copy::CANCELLED_NOTHING_ADDED).await
+    };
     reply::finish(&state.bot, msg.chat.id, "add_wallet.confirm", outcome).await
 }
 
-async fn confirm_body(
+async fn create(
     state: &AppState,
     dialogue: &FlowDialogue,
-    msg: &Message,
-    (address, label): (String, Option<String>),
+    surface: Surface,
+    address: String,
+    label: Option<String>,
 ) -> Result<()> {
-    if !is_affirmative(text_of(msg)) {
-        super::reset(dialogue).await;
-        return reprompt(state, msg, copy::CANCELLED_NOTHING_ADDED).await;
-    }
-
     match WalletRepo::new(&state.db)
         .create(&address, label.as_deref())
         .await
     {
         Ok(wallet) => {
-            reply::send_text(
+            let name = wallet
+                .label
+                .clone()
+                .unwrap_or_else(|| "unnamed".to_string());
+            let rows = vec![vec![
+                button("🚨 Create Alert", "ac:new"),
+                button("🏠 Menu", MAIN),
+            ]];
+            super::reset(dialogue).await;
+            ui::render(
                 &state.bot,
-                msg.chat.id,
-                copy::wallet_saved(&wallet.display(), wallet.id),
+                surface,
+                Screen::new(copy::wallet_saved(&ui::esc(&name)), rows),
             )
             .await?;
         }
-        Err(err) => reply::report_error(&state.bot, msg.chat.id, "add_wallet", &err).await,
+        Err(err) => {
+            super::reset(dialogue).await;
+            reply::report_error(&state.bot, surface.chat(), "add_wallet", &err).await;
+        }
     }
 
-    super::reset(dialogue).await;
     Ok(())
 }

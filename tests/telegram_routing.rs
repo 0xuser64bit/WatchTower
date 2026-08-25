@@ -48,24 +48,30 @@ async fn assert_reply_contains(text: &str, expected: &str) {
 }
 
 #[tokio::test]
-async fn start_reaches_the_welcome_handler() {
-    assert_reply_contains("/start", "WatchTower watches Solana").await;
+async fn start_opens_the_main_menu() {
+    assert_reply_contains("/start", "WatchTower").await;
 }
 
 #[tokio::test]
-async fn a_new_user_is_given_three_steps_not_a_command_dump() {
-    // The first message tells someone what to press instead of listing every command.
-    assert_reply_contains("/start", "/addtoken").await;
-    assert_reply_contains("/start", "/addalert").await;
+async fn start_presents_tappable_sections_not_a_command_dump() {
+    // The first message shows sections to tap rather than a list of slash commands.
+    assert_reply_contains("/start", "Alerts").await;
+    assert_reply_contains("/start", "Tokens").await;
+    assert_reply_contains("/start", "Wallets").await;
 }
 
 #[tokio::test]
-async fn help_explains_operators_with_worked_examples() {
-    assert_reply_contains("/help", "%down").await;
-    assert_reply_contains("/help", "e.g.").await;
-    // The three states /alerts can show must be looked up somewhere.
+async fn menu_opens_the_main_menu() {
+    assert_reply_contains("/menu", "WatchTower").await;
+}
+
+#[tokio::test]
+async fn help_explains_behaviour_and_states() {
+    // The redesigned help describes behaviour and the alert states in words, and
+    // offers buttons rather than a command list.
     assert_reply_contains("/help", "armed").await;
     assert_reply_contains("/help", "firing").await;
+    assert_reply_contains("/help", "Create Alert").await;
 }
 
 #[tokio::test]
@@ -75,27 +81,23 @@ async fn help_states_the_scope_so_nobody_assumes_multi_chain() {
 }
 
 #[tokio::test]
-async fn help_lists_commands() {
-    assert_reply_contains("/help", "/addalert").await;
-}
-
-#[tokio::test]
 async fn status_reaches_the_status_handler() {
     assert_reply_contains("/status", "poll interval").await;
 }
 
 #[tokio::test]
 async fn empty_listings_reach_their_handlers() {
-    assert_reply_contains("/tokens", "No tokens tracked yet").await;
-    assert_reply_contains("/wallets", "No wallets tracked yet").await;
-    assert_reply_contains("/alerts", "No alert rules yet").await;
-    assert_reply_contains("/history", "No alerts have fired yet").await;
+    assert_reply_contains("/tokens", "No tokens yet").await;
+    assert_reply_contains("/wallets", "No wallets yet").await;
+    assert_reply_contains("/alerts", "No alerts yet").await;
+    assert_reply_contains("/history", "Nothing has fired yet").await;
 }
 
 #[tokio::test]
 async fn admin_commands_reach_their_handlers() {
-    assert_reply_contains("/admin", "Admin panel").await;
-    assert_reply_contains("/listusers", "Users (1)").await;
+    assert_reply_contains("/admin", "Admin Panel").await;
+    // The user list shows each user as a tappable row carrying their id.
+    assert_reply_contains("/listusers", "111").await;
 }
 
 #[tokio::test]
@@ -120,15 +122,15 @@ async fn a_bad_id_argument_reports_usage_instead_of_generic_help() {
 
 #[tokio::test]
 async fn plain_text_is_not_swallowed_by_a_flow() {
-    // A bare base58 address with no flow active must not be treated as an answer.
-    assert_reply_contains("hello there", "I only take commands").await;
+    // A bare message with no flow active must not be treated as an answer.
+    assert_reply_contains("hello there", "I only take taps and commands").await;
 }
 
 #[tokio::test]
 async fn a_pasted_address_is_answered_with_what_to_do_with_it() {
     // Pasting an address is the most likely thing someone tries without a command;
-    // pointing them at the manual instead of the two relevant commands is a dead end.
-    assert_reply_contains("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "/addtoken").await;
+    // pointing them at the two ways to track one beats pointing at the manual.
+    assert_reply_contains("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Add Token").await;
 }
 
 #[tokio::test]

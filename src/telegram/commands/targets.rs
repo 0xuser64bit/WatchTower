@@ -1,4 +1,8 @@
-//! Listing and deleting tracked tokens and wallets.
+//! Token and wallet slash commands.
+//!
+//! Listings open the redesigned screens; `/deletetoken <id>` and `/deletewallet <id>`
+//! remain as typed shortcuts. The tap-driven path lives in
+//! [`crate::telegram::screens`].
 
 use crate::app_state::AppState;
 use crate::db::repos::tokens::TokenRepo;
@@ -6,7 +10,8 @@ use crate::db::repos::wallets::WalletRepo;
 use crate::error::Result;
 use crate::telegram::commands::parse_id;
 use crate::telegram::flows::HandlerResult;
-use crate::telegram::reply;
+use crate::telegram::ui::Surface;
+use crate::telegram::{reply, screens};
 use teloxide::prelude::*;
 
 pub async fn list_tokens(state: AppState, msg: Message) -> HandlerResult {
@@ -17,44 +22,8 @@ pub async fn list_tokens(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    let outcome = render_tokens(&state, &msg).await;
+    let outcome = screens::show_tokens(&state, Surface::New(msg.chat.id), 0).await;
     reply::finish(&state.bot, msg.chat.id, "list_tokens", outcome).await
-}
-
-async fn render_tokens(state: &AppState, msg: &Message) -> Result<()> {
-    let tokens = TokenRepo::new(&state.db).list().await?;
-
-    if tokens.is_empty() {
-        reply::send_text(
-            &state.bot,
-            msg.chat.id,
-            "No tokens tracked yet. Use /addtoken to add one.",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let body = tokens
-        .iter()
-        .map(|token| {
-            format!(
-                "{}. {} — {}\n   {}",
-                token.id,
-                token.symbol.as_deref().unwrap_or("no symbol"),
-                token.mint_address,
-                rule_count(token.rule_count)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("Tracked tokens ({}):\n\n{body}", tokens.len()),
-    )
-    .await?;
-    Ok(())
 }
 
 pub async fn delete_token(state: AppState, msg: Message, args: String) -> HandlerResult {
@@ -104,44 +73,8 @@ pub async fn list_wallets(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    let outcome = render_wallets(&state, &msg).await;
+    let outcome = screens::show_wallets(&state, Surface::New(msg.chat.id), 0).await;
     reply::finish(&state.bot, msg.chat.id, "list_wallets", outcome).await
-}
-
-async fn render_wallets(state: &AppState, msg: &Message) -> Result<()> {
-    let wallets = WalletRepo::new(&state.db).list().await?;
-
-    if wallets.is_empty() {
-        reply::send_text(
-            &state.bot,
-            msg.chat.id,
-            "No wallets tracked yet. Use /addwallet to add one.",
-        )
-        .await?;
-        return Ok(());
-    }
-
-    let body = wallets
-        .iter()
-        .map(|wallet| {
-            format!(
-                "{}. {} — {}\n   {}",
-                wallet.id,
-                wallet.label.as_deref().unwrap_or("no label"),
-                wallet.address,
-                rule_count(wallet.rule_count)
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    reply::send_text(
-        &state.bot,
-        msg.chat.id,
-        format!("Tracked wallets ({}):\n\n{body}", wallets.len()),
-    )
-    .await?;
-    Ok(())
 }
 
 pub async fn delete_wallet(state: AppState, msg: Message, args: String) -> HandlerResult {
@@ -183,15 +116,6 @@ async fn remove_wallet(state: &AppState, msg: &Message, id: i64) -> Result<()> {
     Ok(())
 }
 
-/// How many alerts watch a target, phrased so the common cases read naturally.
-fn rule_count(count: i64) -> String {
-    match count {
-        0 => "no alerts yet".to_string(),
-        1 => "1 alert".to_string(),
-        n => format!("{n} alerts"),
-    }
-}
-
 /// Cascading deletes are reported explicitly: silently removing a user's alert rules
 /// is exactly the kind of surprise that erodes trust in a monitoring tool.
 fn cascade_note(rules_removed: i64) -> String {
@@ -205,13 +129,6 @@ fn cascade_note(rules_removed: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn rule_counts_read_naturally() {
-        assert_eq!(rule_count(0), "no alerts yet");
-        assert_eq!(rule_count(1), "1 alert");
-        assert_eq!(rule_count(7), "7 alerts");
-    }
 
     #[test]
     fn cascade_note_reads_naturally() {

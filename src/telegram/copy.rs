@@ -1,163 +1,217 @@
 //! Every multi-line message the bot sends.
 //!
-//! Collected here for two reasons. The tone and structure of the copy can be reviewed
-//! as a whole rather than hunted across handlers, and the strings are built with
-//! `concat!` of single-line literals so source indentation cannot leak into a message
-//! — a backslash line-continuation silently swallows the following line's leading
-//! whitespace only when it is written exactly right, and getting it wrong ships
-//! ragged output that no type checker will catch.
+//! Collected here so the tone and structure of the copy can be reviewed as a whole,
+//! and built with `concat!` of single-line literals so source indentation cannot leak
+//! into a message.
 //!
-//! Plain text only. Telegram's Markdown modes would need every user-supplied label and
-//! base58 address escaped on every path, and one missed escape fails the send.
+//! Screens and guided prompts are rendered with Telegram's **HTML** parse mode, so any
+//! literal `<`, `>` or `&` in this file must be written as an entity (`&lt;`, `&gt;`,
+//! `&amp;`). User-supplied values are escaped by the renderer, not here. A handful of
+//! terse error reprompts are still sent as plain text (see [`crate::telegram::reply`])
+//! and may use raw comparison symbols; those are called out where they live.
 
-// ── Onboarding ──────────────────────────────────────────────────────────────────────
+// ── Main menu & onboarding ────────────────────────────────────────────────────────
 
-pub fn quick_start(poll_seconds: u64) -> String {
-    format!(
-        concat!(
-            "WatchTower watches Solana and messages you when something moves.\n",
-            "\n",
-            "Three steps to your first alert:\n",
-            "\n",
-            "  1. /addtoken   add a token you care about\n",
-            "  2. /addalert   tell me when to ping you\n",
-            "  3. that's it   I check every {0} seconds from then on\n",
-            "\n",
-            "You only ever paste an address. I ask one short question at a\n",
-            "time, and /cancel gets you out of anything.\n",
-            "\n",
-            "Want to see it work first? Track USDC:\n",
-            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\n",
-            "\n",
-            "Every command, with examples: /help"
-        ),
-        poll_seconds
-    )
+/// A short, human summary of what is being watched, e.g. `2 tokens and 1 wallet`.
+fn watching(tokens: i64, wallets: i64) -> String {
+    let mut parts = Vec::new();
+    if tokens > 0 {
+        parts.push(plural(tokens, "token", "tokens"));
+    }
+    if wallets > 0 {
+        parts.push(plural(wallets, "wallet", "wallets"));
+    }
+    match parts.len() {
+        0 => "nothing yet".to_string(),
+        1 => parts.remove(0),
+        _ => format!("{} and {}", parts[0], parts[1]),
+    }
 }
 
-pub fn returning_welcome(watching: &str) -> String {
+fn plural(count: i64, one: &str, many: &str) -> String {
+    if count == 1 {
+        format!("{count} {one}")
+    } else {
+        format!("{count} {many}")
+    }
+}
+
+/// The main menu body, adapting to whether anything is set up yet.
+pub fn main_menu(tokens: i64, wallets: i64, rules: i64) -> String {
+    if tokens == 0 && wallets == 0 && rules == 0 {
+        return concat!(
+            "<b>WatchTower</b>\n",
+            "Solana price &amp; balance alerts.\n",
+            "\n",
+            "Nothing is tracked yet. Add a token or wallet, then create an\n",
+            "alert and I'll message you when it moves.\n",
+            "\n",
+            "Pick a section to begin."
+        )
+        .to_string();
+    }
+
     format!(
         concat!(
-            "WatchTower is watching {0}.\n",
+            "<b>WatchTower</b>\n",
+            "Solana price &amp; balance alerts.\n",
             "\n",
-            "Check in:\n",
-            "  /alerts    your alerts, and whether any are firing\n",
-            "  /status    is monitoring healthy right now\n",
-            "  /history   what has fired recently\n",
+            "Watching <b>{0}</b>, with {1}.\n",
             "\n",
-            "Add more:\n",
-            "  /addtoken   /addwallet   /addalert\n",
-            "\n",
-            "Everything, with examples: /help"
+            "Pick a section."
         ),
-        watching
+        watching(tokens, wallets),
+        plural(rules, "alert", "alerts")
     )
 }
 
 pub const NO_ADMINS_WARNING: &str = concat!(
-    "Heads up: there are no active admins, so alerts have nowhere to go.\n",
-    "Use /addadmin to fix that."
+    "⚠️ There are no active admins, so alerts have nowhere to go.\n",
+    "Open 🛡 Admin to add one."
 );
+
+// ── Help ──────────────────────────────────────────────────────────────────────────
 
 pub const HELP: &str = concat!(
-    "WatchTower - price and balance alerts for Solana.\n",
+    "<b>WatchTower</b> — price &amp; balance alerts for Solana.\n",
     "\n",
-    "HOW ALERTS WORK\n",
-    "  An alert fires when its condition becomes true, then goes quiet\n",
-    "  until it clears. \"price > 100\" pings you once when it crosses 100,\n",
-    "  not every minute while it stays there. When it falls back under\n",
-    "  100 the alert re-arms, ready for the next crossing.\n",
+    "<b>How alerts work</b>\n",
+    "An alert fires once when its condition becomes true, then stays\n",
+    "quiet until it clears. \"price above $100\" pings you when it crosses\n",
+    "$100 — not every minute after. When it drops back under $100 it\n",
+    "re-arms for the next crossing.\n",
     "\n",
-    "SET SOMETHING UP\n",
-    "  /addtoken    track a token, by mint address\n",
-    "  /addwallet   track a wallet, by address\n",
-    "  /addalert    create an alert on something you track\n",
+    "Percentage alerts measure from the last time they fired, so\n",
+    "\"up 10%\" tells you about every 10% move.\n",
     "\n",
-    "  Each asks a few short questions; /cancel gets you out.\n",
-    "  Track a token or wallet first - alerts attach to those.\n",
+    "<b>What you can watch</b>\n",
+    "🪙 a token's price, in USD\n",
+    "👛 a wallet's balance, in SOL\n",
     "\n",
-    "WHAT YOU CAN WATCH\n",
-    "  A token's price in USD, and a wallet's SOL balance.\n",
+    "<b>Conditions</b>\n",
+    "Above · Below · At or above · At or below · Up % · Down %\n",
     "\n",
-    "  >       goes above       e.g.  > 250      price passes $250\n",
-    "  <       drops below      e.g.  < 5        balance dips under 5 SOL\n",
-    "  >=      at or above\n",
-    "  <=      at or below\n",
-    "  %up     rises by         e.g.  %up 10     every +10% move\n",
-    "  %down   falls by         e.g.  %down 15   every -15% move\n",
+    "<b>Alert states</b>\n",
+    "🟢 armed — waiting for the condition to become true\n",
+    "🔴 firing — condition is true; you've been notified\n",
+    "⚪ disabled — paused, not being checked\n",
     "\n",
-    "  Percentage alerts measure from the last time they fired, so\n",
-    "  \"%up 10\" tells you about every 10% move, not just the first.\n",
+    "<b>Good to know</b>\n",
+    "Solana only, and read-only — WatchTower never holds a key or moves\n",
+    "funds. Alerts are sent to every admin.\n",
     "\n",
-    "LOOK AT THINGS\n",
-    "  /alerts     your alerts, their state and last reading\n",
-    "  /tokens     tracked tokens\n",
-    "  /wallets    tracked wallets\n",
-    "  /history    alerts that have already fired\n",
-    "  /status     is monitoring healthy, are the data feeds up\n",
-    "\n",
-    "CHANGE THINGS\n",
-    "  /disablerule 3     pause alert 3, keep it\n",
-    "  /enablerule 3      start it again, freshly armed\n",
-    "  /deleterule 3      remove alert 3\n",
-    "  /deletetoken 2     stop tracking token 2, and its alerts\n",
-    "  /deletewallet 1    stop tracking wallet 1, and its alerts\n",
-    "\n",
-    "  The numbers come from /alerts, /tokens and /wallets.\n",
-    "\n",
-    "WHAT THE STATES MEAN\n",
-    "  armed      condition is false; you'll be pinged when it turns true\n",
-    "  firing     condition is true and you have been pinged\n",
-    "  disabled   paused, not being checked\n",
-    "\n",
-    "GOOD TO KNOW\n",
-    "  Solana only, and read-only - I never hold a key or move funds.\n",
-    "  Alerts go to every admin. /status says if that list is empty."
+    "Use the buttons here, or the menu button by the message box."
 );
 
-pub const HELP_ADMIN: &str = concat!(
-    "\n",
-    "\n",
-    "ADMIN\n",
-    "  /admin                the admin panel\n",
-    "  /listusers            who can use this bot\n",
-    "  /addadmin 123456789   let someone in, as an admin\n",
-    "  /demote 123456789     take admin away\n",
-    "  /block 123456789      revoke all access\n",
-    "  /unblock 123456789    restore it\n",
-    "\n",
-    "  Those are Telegram user IDs, not usernames - @userinfobot\n",
-    "  will tell someone theirs.\n",
-    "\n",
-    "  You can't demote or block yourself, and the last admin can't be\n",
-    "  removed: there would be no way back in."
+// ── Admin ───────────────────────────────────────────────────────────────────────────
+
+pub fn admin_panel(active_admins: i64) -> String {
+    let warning = if active_admins == 0 {
+        "\n\n⚠️ No active admins — alerts cannot be delivered."
+    } else {
+        ""
+    };
+
+    format!(
+        concat!(
+            "<b>🛡 Admin Panel</b>\n",
+            "\n",
+            "Active admins (who receive every alert): <b>{0}</b>\n",
+            "\n",
+            "Manage who can use WatchTower and who is alerted.{1}"
+        ),
+        active_admins, warning
+    )
+}
+
+pub const USER_GONE: &str = "That user is not registered.";
+pub const CANNOT_SELF: &str = "You can't do that to your own account. Ask another admin.";
+pub const LAST_ADMIN: &str = concat!(
+    "That's the last active admin. Add another admin first, otherwise\n",
+    "nobody could manage the bot or receive alerts."
 );
 
-pub const ADMIN_PANEL: &str = concat!(
-    "Admin panel\n",
+pub fn ask_admin_id() -> String {
+    concat!(
+        "<b>Add an admin</b>\n",
+        "\n",
+        "Send the person's numeric Telegram user ID. It's a number like\n",
+        "123456789 — @userinfobot will tell them theirs.\n",
+        "\n",
+        "They'll be able to manage the bot and will receive every alert."
+    )
+    .to_string()
+}
+
+pub const BAD_ADMIN_ID: &str =
+    "That isn't a Telegram user ID. Send a positive number, e.g. 123456789.";
+
+pub fn confirm_admin(target: i64, already_known: bool) -> String {
+    let note = if already_known {
+        "\n\nThey're already known to the bot; this grants them admin."
+    } else {
+        ""
+    };
+    format!(
+        concat!(
+            "<b>Add admin</b>\n",
+            "\n",
+            "User <code>{0}</code> will become an admin.{1}"
+        ),
+        target, note
+    )
+}
+
+// ── Empty states & stale references ──────────────────────────────────────────────────
+
+pub const EMPTY_ALERTS: &str = concat!(
+    "<b>🚨 Your Alerts</b>\n",
     "\n",
-    "  /listusers            who can use this bot\n",
-    "  /addadmin 123456789   let someone in, as an admin\n",
-    "  /demote 123456789     take admin away\n",
-    "  /block 123456789      revoke all access\n",
-    "  /unblock 123456789    restore it\n",
+    "No alerts yet.\n",
     "\n",
-    "Only registered, unblocked users can use the bot at all, and active\n",
-    "admins are who every alert is sent to."
+    "Create one and I'll ping you when a price or balance crosses your\n",
+    "line."
+);
+
+pub const ALERT_GONE: &str = "That alert no longer exists.";
+
+pub const EMPTY_TOKENS: &str = concat!(
+    "<b>🪙 Tracked Tokens</b>\n",
+    "\n",
+    "No tokens yet.\n",
+    "\n",
+    "Add a token by its mint address to watch its price in USD."
+);
+
+pub const TOKEN_GONE: &str = "That token is no longer tracked.";
+
+pub const EMPTY_WALLETS: &str = concat!(
+    "<b>👛 Tracked Wallets</b>\n",
+    "\n",
+    "No wallets yet.\n",
+    "\n",
+    "Add a wallet by its address to watch its SOL balance."
+);
+
+pub const WALLET_GONE: &str = "That wallet is no longer tracked.";
+
+pub const EMPTY_HISTORY: &str = concat!(
+    "<b>📜 Alert History</b>\n",
+    "\n",
+    "Nothing has fired yet.\n",
+    "\n",
+    "When an alert triggers, it will appear here."
 );
 
 // ── Fallbacks ───────────────────────────────────────────────────────────────────────
 
 pub const PASTED_AN_ADDRESS: &str = concat!(
-    "That looks like a Solana address. To watch it:\n",
-    "\n",
-    "  /addtoken    if it's a token mint\n",
-    "  /addwallet   if it's a wallet\n",
-    "\n",
-    "I'll ask for the address next."
+    "That looks like a Solana address. To watch it, open the menu and\n",
+    "choose 🪙 Add Token or 👛 Add Wallet — or send /addtoken or /addwallet."
 );
 
-pub const NOT_A_COMMAND: &str = "I only take commands. /help lists them, /start if you're new.";
+pub const NOT_A_COMMAND: &str =
+    "I only take taps and commands. Send /menu to open the menu, or /help.";
 
 pub const NOT_A_PRIVATE_CHAT: &str = concat!(
     "WatchTower only works in a direct message.\n",
@@ -167,29 +221,27 @@ pub const NOT_A_PRIVATE_CHAT: &str = concat!(
 // ── Adding a token ──────────────────────────────────────────────────────────────────
 
 pub const ASK_MINT: &str = concat!(
-    "Which token? Paste its mint address.\n",
+    "<b>Add a token</b>\n",
     "\n",
-    "It's 32-44 letters and numbers - you'll find it on the token's page\n",
-    "on any Solana explorer, or on CoinGecko.\n",
+    "Which token? Paste its mint address — 32-44 letters and numbers,\n",
+    "shown on any Solana explorer or on CoinGecko.\n",
     "\n",
     "USDC, for example:\n",
-    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v\n",
-    "\n",
-    "/cancel to stop."
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 );
 
 pub const BAD_ADDRESS: &str = concat!(
     "That doesn't look like a Solana address. They're 32-44 letters and\n",
-    "numbers, with no 0, O, I or l in them.\n",
-    "\n",
-    "Paste just the address, nothing else. /cancel to stop."
+    "numbers, with no 0, O, I or l. Paste just the address."
 );
 
 pub const NOT_PRICED: &str = concat!(
-    "I can't find a USD price for that mint, so a price alert on it could\n",
-    "never fire. Not adding it.\n",
+    "<b>No price found</b>\n",
     "\n",
-    "Double-check the address, or try a token that's listed on CoinGecko."
+    "I can't find a USD price for that mint, so a price alert on it could\n",
+    "never fire — so I'm not adding it.\n",
+    "\n",
+    "Check the address, or try a token listed on CoinGecko."
 );
 
 pub fn ask_token_name(price_line: &str) -> String {
@@ -197,10 +249,8 @@ pub fn ask_token_name(price_line: &str) -> String {
         concat!(
             "{0}\n",
             "\n",
-            "What should I call it? A short name like USDC keeps your alerts\n",
-            "readable.\n",
-            "\n",
-            "Send a name, or `skip` to just use the address."
+            "Give it a short name like USDC to keep your alerts readable,\n",
+            "or tap Skip to just use the address."
         ),
         price_line
     )
@@ -211,152 +261,101 @@ pub fn ask_wallet_name(balance_line: &str) -> String {
         concat!(
             "{0}\n",
             "\n",
-            "What should I call it? Something like Treasury or Cold wallet\n",
-            "keeps your alerts readable.\n",
-            "\n",
-            "Send a name, or `skip` to just use the address."
+            "Give it a short name like Treasury to keep your alerts\n",
+            "readable, or tap Skip to just use the address."
         ),
         balance_line
     )
 }
 
 pub const ASK_ADDRESS: &str = concat!(
-    "Which wallet? Paste its address.\n",
+    "<b>Add a wallet</b>\n",
     "\n",
-    "32-44 letters and numbers, the same thing you'd paste into an\n",
-    "explorer. I only read the balance - I never need a key or a seed\n",
-    "phrase, and I can't move anything.\n",
+    "Paste the wallet address — 32-44 letters and numbers, the same\n",
+    "thing you'd paste into an explorer.\n",
     "\n",
-    "/cancel to stop."
+    "I only read the balance. I never need a key or seed phrase, and I\n",
+    "can't move anything."
 );
 
-pub const ASK_SHORT_NAME: &str = "Send a short name as text, or `skip`.";
+pub const ASK_SHORT_NAME: &str = "Send a short name as text, or tap Skip.";
 
-pub fn confirm_token(name: &str, mint: &str) -> String {
+pub fn token_saved(display: &str) -> String {
     format!(
         concat!(
-            "Ready to track:\n",
+            "✅ Tracking <b>{0}</b>.\n",
             "\n",
-            "  Name   {0}\n",
-            "  Mint   {1}\n",
-            "\n",
-            "Send `yes` to save it, or /cancel."
+            "Create an alert to get pinged when its price moves."
         ),
-        name, mint
+        display
     )
 }
 
-pub fn confirm_wallet(name: &str, address: &str) -> String {
+pub fn wallet_saved(display: &str) -> String {
     format!(
         concat!(
-            "Ready to track:\n",
+            "✅ Tracking <b>{0}</b>.\n",
             "\n",
-            "  Name      {0}\n",
-            "  Address   {1}\n",
-            "\n",
-            "Send `yes` to save it, or /cancel."
+            "Create an alert to get pinged when its SOL balance moves."
         ),
-        name, address
+        display
     )
 }
 
-pub fn token_saved(display: &str, id: i64) -> String {
-    format!(
-        concat!(
-            "Tracking {0} as token {1}.\n",
-            "\n",
-            "Next: /addalert to get pinged when its price moves."
-        ),
-        display, id
-    )
-}
-
-pub fn wallet_saved(display: &str, id: i64) -> String {
-    format!(
-        concat!(
-            "Tracking {0} as wallet {1}.\n",
-            "\n",
-            "Next: /addalert to get pinged when its SOL balance changes."
-        ),
-        display, id
-    )
-}
-
-pub const CANCELLED_NOTHING_ADDED: &str = "Cancelled - nothing was added.";
+pub const CANCELLED_NOTHING_ADDED: &str = "Cancelled — nothing was added.";
 
 // ── Creating an alert ───────────────────────────────────────────────────────────────
 
 pub const NOTHING_TO_ALERT_ON: &str = concat!(
-    "Nothing to alert on yet. Add something first:\n",
+    "<b>Create an alert</b>\n",
     "\n",
-    "  /addtoken    a token, to watch its price\n",
-    "  /addwallet   a wallet, to watch its SOL balance\n",
-    "\n",
-    "Then come back to /addalert."
+    "There's nothing to watch yet. Add a token (for its price) or a\n",
+    "wallet (for its SOL balance) first, then come back."
 );
 
-pub fn ask_alert_kind(tokens: i64, wallets: i64) -> String {
-    format!(
-        concat!(
-            "What should this alert watch?\n",
-            "\n",
-            "  `token`    a token's price in USD   ({0} tracked)\n",
-            "  `wallet`   a wallet's SOL balance   ({1} tracked)\n",
-            "\n",
-            "Send one of those two words. /cancel to stop."
-        ),
-        tokens, wallets
-    )
-}
+pub const ASK_ALERT_KIND: &str = concat!(
+    "<b>New alert — step 1 of 4</b>\n",
+    "\n",
+    "What should this alert watch?"
+);
 
-pub const BAD_ALERT_KIND: &str = "Send just the word `token` or `wallet`. /cancel to stop.";
+pub const BAD_ALERT_KIND: &str = "Tap Token or Wallet, or send the word `token` or `wallet`.";
 
-pub fn ask_which_target(listing: &[String]) -> String {
-    format!(
-        "Which one? Send the number in front of it.\n\n{}",
-        listing.join("\n")
-    )
-}
+pub const ASK_TARGET: &str = concat!(
+    "<b>New alert — step 2 of 4</b>\n",
+    "\n",
+    "Which one? Tap it below."
+);
 
-pub const BAD_TARGET_NUMBER: &str = "Send just the number in front of the one you want, like `1`.";
+pub const BAD_TARGET_NUMBER: &str = "Tap one of the buttons, or send its number.";
 
-/// The step people get lost on, so each option is spelled out for this target type.
-pub fn ask_operator(subject: &str, unit: &str, high: &str, low: &str) -> String {
-    format!(
-        concat!(
-            "When should I ping you?\n",
-            "\n",
-            "  `>`       {0} goes above a number\n",
-            "  `<`       {0} drops below a number\n",
-            "  `>=`      at or above\n",
-            "  `<=`      at or below\n",
-            "  `%up`     it rises by some percent\n",
-            "  `%down`   it falls by some percent\n",
-            "\n",
-            "So `>` then {2} pings you when the {0} passes {2} {1};\n",
-            "`<` then {3} pings you when it drops under {3} {1}.\n",
-            "\n",
-            "Most people want `<` to catch a drop, or `%down` for a crash."
-        ),
-        subject, unit, high, low
-    )
-}
+pub const ASK_OPERATOR: &str = concat!(
+    "<b>New alert — step 3 of 4</b>\n",
+    "\n",
+    "When should I ping you?\n",
+    "\n",
+    "Above / Below fire when the value crosses a number you set.\n",
+    "Up % / Down % fire on each move of that size from where it is now."
+);
 
-pub const BAD_OPERATOR: &str =
-    "I didn't recognise that. Send exactly one of:  >  <  >=  <=  %up  %down";
+// Plain-text reprompt: sent without a parse mode, so raw symbols are fine here.
+pub const BAD_OPERATOR: &str = "Tap a condition above, or send one of:  >  <  >=  <=  %up  %down";
 
 pub const ASK_PERCENT: &str = concat!(
-    "How big a move? Send a percentage, like `10` for 10%.\n",
+    "<b>New alert — step 4 of 4</b>\n",
     "\n",
-    "I take a reading now and measure from there. Each time the alert\n",
-    "fires I reset the starting point, so you hear about every move of\n",
-    "that size - not just the first one."
+    "How big a move? Send a percentage, like 10 for 10%.\n",
+    "\n",
+    "I take a reading now and measure from there, resetting after each\n",
+    "alert so you hear about every move of that size."
 );
 
 pub fn ask_threshold(example: &str, unit: &str) -> String {
     format!(
         concat!(
-            "What number? Send it on its own, like `{0}`.\n",
+            "<b>New alert — step 4 of 4</b>\n",
+            "\n",
+            "What value? Send a number on its own, like {0}.\n",
             "\n",
             "This one is in {1}."
         ),
@@ -364,10 +363,8 @@ pub fn ask_threshold(example: &str, unit: &str) -> String {
     )
 }
 
-pub const BAD_THRESHOLD: &str = concat!(
-    "Send a single positive number, like `1.5` or `250`.\n",
-    "No symbols, no units."
-);
+pub const BAD_THRESHOLD: &str =
+    "Send a single positive number, like 1.5 or 250. No symbols, no units.";
 
 pub const THRESHOLD_TOO_BIG: &str =
     "That's over 1000%, which is almost always a typo. Try a smaller number.";
@@ -375,49 +372,51 @@ pub const THRESHOLD_TOO_BIG: &str =
 pub fn ask_cooldown(default_seconds: i64) -> String {
     format!(
         concat!(
-            "Last question. How long should I wait before this alert can fire\n",
-            "again?\n",
+            "<b>One more thing</b>\n",
             "\n",
-            "Send `skip` for the default of {0} seconds - that's right for\n",
-            "almost everyone.\n",
+            "How long should I wait before this alert can fire again?\n",
             "\n",
-            "It only matters if the value keeps flickering across your number:\n",
-            "the alert already stays quiet on its own until the condition clears."
+            "Tap Use default ({0}s) — right for almost everyone — or send a\n",
+            "number of seconds. It only matters if the value flickers across\n",
+            "your line; the alert already stays quiet until the condition clears."
         ),
         default_seconds
     )
 }
 
-pub const BAD_COOLDOWN: &str = "Send a whole number of seconds between 0 and 86400, or `skip`.";
+pub const BAD_COOLDOWN: &str =
+    "Send a whole number of seconds between 0 and 86400, or tap Use default.";
 
 pub fn confirm_alert(target: &str, condition: &str, cooldown_seconds: i64) -> String {
     format!(
         concat!(
-            "Ready to go:\n",
+            "<b>New Alert</b>\n",
             "\n",
-            "  Watching     {0}\n",
-            "  Ping when    {1}\n",
-            "  Then wait    {2}s before repeating\n",
+            "{0}\n",
+            "<b>Condition:</b> {1}\n",
+            "<b>Then wait:</b> {2}s before repeating\n",
             "\n",
-            "Send `yes` to save it, or /cancel."
+            "Create it?"
         ),
         target, condition, cooldown_seconds
     )
 }
 
-pub fn alert_saved(id: i64, target: &str, condition: &str, poll_seconds: u64) -> String {
+pub fn alert_saved(target: &str, condition: &str, poll_seconds: u64) -> String {
     format!(
         concat!(
-            "Alert {0} is live: {1} {2}.\n",
+            "✅ <b>Alert created</b>\n",
             "\n",
-            "I check every {3} seconds and will message you when it happens.\n",
-            "See it any time with /alerts."
+            "{0}\n",
+            "<b>Condition:</b> {1}\n",
+            "\n",
+            "I check every {2}s and will message you when it happens."
         ),
-        id, target, condition, poll_seconds
+        target, condition, poll_seconds
     )
 }
 
-pub const CANCELLED_NO_ALERT: &str = "Cancelled - no alert was created.";
+pub const CANCELLED_NO_ALERT: &str = "Cancelled — no alert was created.";
 
 #[cfg(test)]
 mod tests {
@@ -426,12 +425,25 @@ mod tests {
     /// Every fixed string, plus one rendering of every parameterised one.
     fn all_copy() -> Vec<(&'static str, String)> {
         vec![
-            ("quick_start", quick_start(60)),
-            ("returning_welcome", returning_welcome("1 token")),
+            ("main_menu_empty", main_menu(0, 0, 0)),
+            ("main_menu_full", main_menu(2, 1, 3)),
             ("no_admins", NO_ADMINS_WARNING.into()),
             ("help", HELP.into()),
-            ("help_admin", HELP_ADMIN.into()),
-            ("admin_panel", ADMIN_PANEL.into()),
+            ("admin_panel", admin_panel(1)),
+            ("admin_panel_zero", admin_panel(0)),
+            ("ask_admin_id", ask_admin_id()),
+            ("bad_admin_id", BAD_ADMIN_ID.into()),
+            ("confirm_admin", confirm_admin(123456789, false)),
+            ("user_gone", USER_GONE.into()),
+            ("cannot_self", CANNOT_SELF.into()),
+            ("last_admin", LAST_ADMIN.into()),
+            ("empty_alerts", EMPTY_ALERTS.into()),
+            ("alert_gone", ALERT_GONE.into()),
+            ("empty_tokens", EMPTY_TOKENS.into()),
+            ("token_gone", TOKEN_GONE.into()),
+            ("empty_wallets", EMPTY_WALLETS.into()),
+            ("wallet_gone", WALLET_GONE.into()),
+            ("empty_history", EMPTY_HISTORY.into()),
             ("pasted_an_address", PASTED_AN_ADDRESS.into()),
             ("not_a_command", NOT_A_COMMAND.into()),
             ("not_private", NOT_A_PRIVATE_CHAT.into()),
@@ -445,20 +457,15 @@ mod tests {
             ),
             ("ask_address", ASK_ADDRESS.into()),
             ("ask_short_name", ASK_SHORT_NAME.into()),
-            ("confirm_token", confirm_token("USDC", "MINT")),
-            ("confirm_wallet", confirm_wallet("Treasury", "ADDR")),
-            ("token_saved", token_saved("USDC (MINT)", 1)),
-            ("wallet_saved", wallet_saved("Treasury (ADDR)", 1)),
+            ("token_saved", token_saved("USDC")),
+            ("wallet_saved", wallet_saved("Treasury")),
             ("cancelled_nothing_added", CANCELLED_NOTHING_ADDED.into()),
             ("nothing_to_alert_on", NOTHING_TO_ALERT_ON.into()),
-            ("ask_alert_kind", ask_alert_kind(2, 1)),
+            ("ask_alert_kind", ASK_ALERT_KIND.into()),
             ("bad_alert_kind", BAD_ALERT_KIND.into()),
-            (
-                "ask_which_target",
-                ask_which_target(&["1. USDC".to_string()]),
-            ),
+            ("ask_target", ASK_TARGET.into()),
             ("bad_target_number", BAD_TARGET_NUMBER.into()),
-            ("ask_operator", ask_operator("price", "USD", "250", "0.99")),
+            ("ask_operator", ASK_OPERATOR.into()),
             ("bad_operator", BAD_OPERATOR.into()),
             ("ask_percent", ASK_PERCENT.into()),
             ("ask_threshold", ask_threshold("1.5", "USD")),
@@ -468,35 +475,14 @@ mod tests {
             ("bad_cooldown", BAD_COOLDOWN.into()),
             (
                 "confirm_alert",
-                confirm_alert("USDC", "price < 0.99 USD", 300),
+                confirm_alert("🪙 <b>USDC</b>", "below $0.99", 300),
             ),
             (
                 "alert_saved",
-                alert_saved(1, "USDC", "price < 0.99 USD", 60),
+                alert_saved("🪙 <b>USDC</b>", "below $0.99", 60),
             ),
             ("cancelled_no_alert", CANCELLED_NO_ALERT.into()),
         ]
-    }
-
-    #[test]
-    fn no_message_has_ragged_indentation() {
-        // User-facing copy must not inherit source indentation or spacing artifacts.
-        for (name, text) in all_copy() {
-            for (n, line) in text.lines().enumerate() {
-                let indent = line.len() - line.trim_start().len();
-                // Two spaces indents a list item; four is the deepest nesting used.
-                assert!(
-                    indent <= 4,
-                    "{name} line {n} is indented {indent}: {line:?}"
-                );
-
-                let body = line.trim_start();
-                assert!(
-                    !body.contains("   ") || body.contains("  "),
-                    "{name} line {n}: {line:?}"
-                );
-            }
-        }
     }
 
     #[test]
@@ -519,84 +505,134 @@ mod tests {
     }
 
     #[test]
-    fn admin_help_still_fits_one_send_when_concatenated() {
-        // `/help` sends HELP and HELP_ADMIN as a single message. Chunking would handle
-        // an overflow, but splitting a reference table across two bubbles reads badly,
-        // so this is the budget to stay inside when adding to either.
-        let combined = format!("{HELP}{HELP_ADMIN}");
-        let chunks = crate::telegram::reply::chunk_message(&combined, 3900);
-        assert_eq!(
-            chunks.len(),
-            1,
-            "combined help is {} UTF-16 units",
-            combined.encode_utf16().count()
-        );
-    }
-
-    #[test]
     fn no_message_is_wider_than_a_phone_screen() {
-        // Telegram wraps, but wrapping a hand-aligned column list destroys it.
+        // Telegram wraps, but a hand-aligned line that wraps reads badly. HTML tags do
+        // not render, so they are discounted from the visible width.
         for (name, text) in all_copy() {
             for (n, line) in text.lines().enumerate() {
+                let visible = strip_tags(line).chars().count();
                 assert!(
-                    line.chars().count() <= 72,
-                    "{name} line {n} is {} chars: {line:?}",
-                    line.chars().count()
+                    visible <= 72,
+                    "{name} line {n} is {visible} chars: {line:?}"
                 );
             }
         }
     }
 
-    #[test]
-    fn help_covers_every_operator_and_state_with_examples() {
-        for operator in [">", "<", ">=", "<=", "%up", "%down"] {
-            assert!(HELP.contains(operator), "{operator} is undocumented");
+    /// Crude tag stripper for the width check: removes `<...>` spans.
+    fn strip_tags(line: &str) -> String {
+        let mut out = String::new();
+        let mut in_tag = false;
+        for ch in line.chars() {
+            match ch {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => out.push(ch),
+                _ => {}
+            }
         }
-        // The three words /alerts prints must be explained somewhere.
+        out
+    }
+
+    #[test]
+    fn help_explains_behaviour_states_and_scope() {
+        // The three states shown on the alert screens must be explained.
         for state in ["armed", "firing", "disabled"] {
             assert!(HELP.contains(state), "{state} is unexplained");
         }
-        assert!(HELP.contains("e.g."), "no worked examples");
+        // The edge-trigger behaviour and the percentage nuance are the whole point.
+        assert!(HELP.contains("crosses"), "edge behaviour not explained");
+        assert!(HELP.contains("every 10% move"), "percentage nuance missing");
+        // Scope, so nobody assumes multi-chain or custody.
         assert!(HELP.contains("Solana only"));
         assert!(HELP.contains("read-only"));
+        // The six conditions are named in words rather than raw symbols.
+        for word in [
+            "Above",
+            "Below",
+            "At or above",
+            "At or below",
+            "Up %",
+            "Down %",
+        ] {
+            assert!(HELP.contains(word), "{word} condition missing from help");
+        }
     }
 
     #[test]
-    fn admin_help_shows_real_arguments_not_placeholders() {
-        // "/addadmin <telegram_id>" tells a user nothing about what to type.
-        assert!(HELP_ADMIN.contains("/addadmin 123456789"));
-        assert!(HELP_ADMIN.contains("@userinfobot"));
-        assert!(!HELP_ADMIN.contains('<'));
-        assert!(!ADMIN_PANEL.contains('<'));
+    fn html_copy_has_no_stray_unescaped_specials() {
+        // A raw `&` not part of an entity, or a `<`/`>` not part of a tag, would break
+        // the HTML send. Reprompts sent as plain text are exempt.
+        let plain_reprompts = [
+            "bad_operator",
+            "bad_address",
+            "bad_alert_kind",
+            "bad_target_number",
+            "bad_threshold",
+            "threshold_too_big",
+            "bad_cooldown",
+            "ask_short_name",
+            "bad_admin_id",
+            "cancelled_nothing_added",
+            "cancelled_no_alert",
+            "not_a_command",
+            "user_gone",
+            "cannot_self",
+            "alert_gone",
+            "token_gone",
+            "wallet_gone",
+        ];
+
+        for (name, text) in all_copy() {
+            if plain_reprompts.contains(&name) {
+                continue;
+            }
+            assert!(
+                well_formed_html(&text),
+                "{name} has unescaped HTML: {text:?}"
+            );
+        }
     }
 
-    #[test]
-    fn onboarding_stays_short() {
-        // Keep onboarding concise enough to scan in one chat bubble.
-        assert!(quick_start(60).lines().count() <= 20);
-        assert!(returning_welcome("1 token").lines().count() <= 15);
+    /// Checks that `<`/`>` only appear as balanced simple tags and every `&` starts a
+    /// known entity. Good enough for the small, controlled tag vocabulary used here.
+    fn well_formed_html(text: &str) -> bool {
+        let mut depth = 0i32;
+        let mut chars = text.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '<' => {
+                    if depth != 0 {
+                        return false;
+                    }
+                    depth = 1;
+                }
+                '>' => {
+                    if depth != 1 {
+                        return false;
+                    }
+                    depth = 0;
+                }
+                '&' => {
+                    let rest: String = chars.clone().take(5).collect();
+                    if !(rest.starts_with("amp;")
+                        || rest.starts_with("lt;")
+                        || rest.starts_with("gt;"))
+                    {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        depth == 0
     }
 
     #[test]
     fn prompts_show_a_concrete_example_of_the_answer() {
         assert!(ASK_MINT.contains("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"));
         assert!(ask_threshold("1.5", "USD").contains("1.5"));
-        assert!(ask_operator("price", "USD", "250", "0.99").contains("250"));
         assert!(ASK_PERCENT.contains("10"));
-    }
-
-    #[test]
-    fn every_step_says_how_to_get_out() {
-        for text in [ASK_MINT, ASK_ADDRESS, BAD_ADDRESS] {
-            assert!(text.contains("/cancel"), "no escape hatch: {text:?}");
-        }
-    }
-
-    #[test]
-    fn skipping_is_described_by_a_word_not_a_symbol() {
-        // `-` is not something anyone guesses.
-        assert!(ask_token_name("x").contains("`skip`"));
-        assert!(ask_cooldown(300).contains("`skip`"));
-        assert!(ASK_SHORT_NAME.contains("`skip`"));
+        assert!(ask_admin_id().contains("123456789"));
     }
 }

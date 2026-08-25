@@ -244,6 +244,33 @@ pub fn message(text: &str) -> Update {
     message_from(ADMIN_ID, text)
 }
 
+/// Builds a callback-query update (a tapped inline button) from `sender`.
+///
+/// The button lives on a regular, accessible message in the private chat, so handlers
+/// edit it in place — the same path a real tap takes.
+pub fn callback_from(sender: i64, data: &str) -> Update {
+    let raw = format!(
+        r#"{{"update_id":1,"callback_query":{{
+            "id":"cbq-1",
+            "from":{{"id":{sender},"is_bot":false,"first_name":"T"}},
+            "message":{{"message_id":10,"date":1700000000,
+                "chat":{{"id":{CHAT_ID},"type":"private","first_name":"T"}},
+                "from":{{"id":1,"is_bot":true,"first_name":"WatchTower"}},
+                "text":"…"}},
+            "chat_instance":"1",
+            "data":{}
+        }}}}"#,
+        serde_json::to_string(data).expect("data json")
+    );
+
+    serde_json::from_str(&raw).expect("callback update json")
+}
+
+/// A tapped inline button from the seeded admin.
+pub fn callback(data: &str) -> Update {
+    callback_from(ADMIN_ID, data)
+}
+
 /// Dispatches `update` through the real handler tree and returns the endpoint result.
 pub async fn dispatch(
     state: &AppState,
@@ -255,8 +282,14 @@ pub async fn dispatch(
     let mut deps = teloxide::dptree::deps![state.clone(), storage, me()];
     deps.insert(update.clone());
 
-    if let UpdateKind::Message(msg) = update.kind {
-        deps.insert(msg);
+    match update.kind {
+        UpdateKind::Message(msg) => {
+            deps.insert(msg);
+        }
+        UpdateKind::CallbackQuery(q) => {
+            deps.insert(q);
+        }
+        _ => {}
     }
 
     match watchtower::telegram::schema().dispatch(deps).await {
@@ -269,3 +302,7 @@ pub async fn dispatch(
 /// A canned successful `sendMessage` response.
 pub const SEND_MESSAGE_OK: &str = r#"{"ok":true,"result":{"message_id":2,"date":1700000000,
     "chat":{"id":111,"type":"private","first_name":"T"},"text":"ok"}}"#;
+
+/// A canned successful response for methods that return `True` (answerCallbackQuery,
+/// setMyCommands, setChatMenuButton).
+pub const TRUE_OK: &str = r#"{"ok":true,"result":true}"#;

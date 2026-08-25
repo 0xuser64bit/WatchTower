@@ -12,6 +12,8 @@ use crate::db::repos::users::UserRepo;
 use crate::db::repos::wallets::WalletRepo;
 use crate::telegram::flows::HandlerResult;
 use crate::telegram::reply;
+use crate::telegram::screens;
+use crate::telegram::ui::Surface;
 use chrono::Utc;
 use teloxide::prelude::*;
 
@@ -23,17 +25,12 @@ pub async fn status(state: AppState, msg: Message) -> HandlerResult {
         return Ok(());
     }
 
-    let outcome = render(&state, &msg).await;
+    let outcome = screens::show_status(&state, Surface::New(msg.chat.id)).await;
     reply::finish(&state.bot, msg.chat.id, "status", outcome).await
 }
 
-async fn render(state: &AppState, msg: &Message) -> crate::error::Result<()> {
-    let text = build(state).await?;
-    reply::send_text(&state.bot, msg.chat.id, text).await?;
-    Ok(())
-}
-
-async fn build(state: &AppState) -> crate::error::Result<String> {
+/// Builds the plaintext status report. Public so the status screen can wrap it.
+pub async fn build(state: &AppState) -> crate::error::Result<String> {
     let snapshot = state.status.snapshot();
     let poll_interval = state.settings.poll_interval;
 

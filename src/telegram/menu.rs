@@ -1,9 +1,9 @@
-//! Telegram's command menu.
+//! Telegram's command menu and menu button.
 //!
 //! Registers commands with Telegram via `setMyCommands`, which is what populates the
-//! autocomplete list users see when they type `/` and the menu button next to the
-//! text field. Without this call the bot has commands but no discoverable UI: the
-//! only way to learn them is `/help`, which a new user has no reason to try.
+//! autocomplete list users see when they type `/`. The menu button next to the text
+//! field is explicitly set to open that command list, so the very first thing a new
+//! user can do is tap it and land on `/start`, which opens the inline main menu.
 //!
 //! Two scopes are used so the menu matches what the caller can actually do:
 //!
@@ -16,25 +16,27 @@
 use crate::db::repos::users::UserRepo;
 use crate::db::Db;
 use teloxide::prelude::*;
-use teloxide::types::{BotCommand, BotCommandScope, Recipient};
+use teloxide::types::{BotCommand, BotCommandScope, MenuButton, Recipient};
 use tracing::{debug, warn};
 
 /// Commands shown to everyone, in the order they appear in the menu.
 ///
-/// Ordered by how a new user actually proceeds — look, then add, then alert — rather
-/// than alphabetically or by internal grouping.
+/// The list leads with the two that open the whole interface — `start` and `menu` —
+/// because navigation is now tap-driven; the rest are shortcuts into individual
+/// screens for people who prefer typing.
 fn everyday_commands() -> Vec<BotCommand> {
     vec![
+        BotCommand::new("menu", "Open the menu"),
         BotCommand::new("start", "Getting started"),
-        BotCommand::new("help", "All commands, with examples"),
-        BotCommand::new("addtoken", "Track a token by mint address"),
-        BotCommand::new("addwallet", "Track a wallet by address"),
+        BotCommand::new("alerts", "Your alerts"),
         BotCommand::new("addalert", "Create an alert"),
-        BotCommand::new("alerts", "Your alerts and their state"),
         BotCommand::new("tokens", "Tracked tokens"),
+        BotCommand::new("addtoken", "Track a token"),
         BotCommand::new("wallets", "Tracked wallets"),
+        BotCommand::new("addwallet", "Track a wallet"),
         BotCommand::new("history", "Alerts that have fired"),
         BotCommand::new("status", "Is monitoring healthy?"),
+        BotCommand::new("help", "How it works"),
         BotCommand::new("cancel", "Stop what we were doing"),
     ]
 }
@@ -48,8 +50,18 @@ fn admin_commands() -> Vec<BotCommand> {
     commands
 }
 
-/// Publishes the menus. Called once at startup.
+/// Publishes the menus and sets the menu button. Called once at startup.
 pub async fn publish(bot: &Bot, db: &Db) {
+    // Point the menu button at the command list so the paperclip-adjacent button is a
+    // real entry point rather than the default.
+    if let Err(err) = bot
+        .set_chat_menu_button()
+        .menu_button(MenuButton::Commands)
+        .await
+    {
+        debug!(%err, "could not set the chat menu button");
+    }
+
     if let Err(err) = bot
         .set_my_commands(everyday_commands())
         .scope(BotCommandScope::AllPrivateChats)

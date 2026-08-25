@@ -24,34 +24,72 @@ quiet until the condition clears. Percentage rules use a rolling baseline that i
 on the first observation and reset after each firing. If a provider is unavailable, the
 rule keeps its stored state instead of being incorrectly re-armed.
 
-## Telegram Commands
+## Using It
 
-Every non-administrative command is available in a private chat to registered,
-unblocked users. Commands that need an id take the number shown by `/tokens`,
-`/wallets`, or `/alerts`.
+WatchTower is a small menu-driven app inside a private Telegram chat. Send `/start`
+(or tap the menu button next to the message box) to open the main menu:
+
+```text
+🚨 Alerts     🪙 Tokens
+👛 Wallets    📜 History
+⚙️ Status     ❔ Help
+🛡 Admin      (admins only)
+```
+
+Everything is done by tapping. Each section opens its own screen with inline buttons
+and consistent navigation (**← Back**, **🏠 Menu**, **✕ Cancel**), and the bot edits
+the current message in place instead of flooding the chat.
+
+Creating an alert is a guided flow — pick what to watch, pick the tracked item, pick a
+condition, type the one value that must be typed, then confirm:
+
+```text
+New Alert
+
+🪙 BONK
+Condition: below $0.000025
+Then wait: 300s before repeating
+
+[ ✅ Create Alert ]
+[ ✎ Edit ] [ ✕ Cancel ]
+```
+
+Managing things is tap-driven too: the Alerts screen lists each rule with its state
+(🟢 armed · 🔴 firing · ⚪ disabled); tapping one opens a detail screen with
+enable/disable and delete. Destructive actions (deleting a rule, token or wallet;
+removing an admin; blocking a user) always ask for confirmation first. IDs are used
+internally but are never something you have to type.
+
+### Command shortcuts
+
+Slash commands remain as shortcuts for people who prefer typing; they open the same
+screens the buttons do. Commands that take an id still accept the number shown in a
+listing, but tapping is the primary path.
 
 | Command | Purpose |
 | --- | --- |
-| `/start`, `/help` | Onboarding and command reference |
+| `/start`, `/menu` | Open the main menu |
+| `/help` | How it works, with buttons into the common actions |
 | `/status` | Engine, provider, database, and recipient health |
 | `/cancel` | Leave an active guided flow |
 | `/addtoken` | Verify and track a token mint |
-| `/tokens` | List tracked tokens and dependent rules |
+| `/tokens` | Tracked tokens screen |
 | `/deletetoken <id>` | Remove a token and its rules |
 | `/addwallet` | Verify and track a wallet address |
-| `/wallets` | List tracked wallets and dependent rules |
+| `/wallets` | Tracked wallets screen |
 | `/deletewallet <id>` | Remove a wallet and its rules |
-| `/addalert` | Create a rule for a tracked target |
-| `/alerts` | List rules, state, last value, and baseline |
+| `/addalert` | Start the guided alert flow |
+| `/alerts` | Your alerts and their state |
 | `/enablerule <id>` / `/disablerule <id>` | Enable or pause a rule |
 | `/deleterule <id>` | Delete a rule; history remains |
-| `/history` | Show the 15 most recent alert events |
+| `/history` | Recent alert events |
 
 Administrators also have `/admin`, `/listusers`, `/addadmin <telegram_id>`,
-`/demote <telegram_id>`, `/block <telegram_id>`, and `/unblock <telegram_id>`.
-Telegram publishes the everyday and administrator command menus automatically at
-startup; destructive commands that require an argument are intentionally omitted from
-the tap-to-send menu.
+`/demote <telegram_id>`, `/block <telegram_id>`, and `/unblock <telegram_id>`. The
+Admin Panel offers the same actions as buttons, including a guided prompt for the one
+value it genuinely needs — a new admin's Telegram user id. Telegram publishes the
+everyday and administrator command menus automatically at startup, and the menu button
+is pointed at that list.
 
 Removing a target cascades to its rules. Alert history is stored as a snapshot, so it
 remains readable after a rule or target is deleted.
@@ -176,7 +214,7 @@ alongside the separately protected `.env` file.
 The daemon has two long-running planes sharing `AppState`:
 
 ```text
-Telegram long polling -> telegram (authorization, commands, guided flows)
+Telegram long polling -> telegram (messages + button taps, authorization, screens, flows)
                                |
                                v
                          SQLite source of truth
@@ -185,7 +223,9 @@ Telegram long polling -> telegram (authorization, commands, guided flows)
 providers (CoinGecko, Solana RPC) <- engine (poll, evaluate, dispatch) -> Telegram admins
 ```
 
-- `telegram`: private-chat routing, authorization, user-facing copy, and mutations.
+- `telegram`: private-chat routing for both messages and callback queries,
+  authorization, the screen renderers and inline keyboards (`screens`, `ui`,
+  `callback`), guided `flows`, user-facing `copy`, and all mutations.
 - `engine`: interval scheduling, provider reads, rule evaluation, persistence, and
   runtime health.
 - `rules`: pure rule types and evaluation logic.
@@ -232,17 +272,20 @@ separate from the offline suite:
 cargo test --test live_providers -- --ignored
 ```
 
-The automated tests exercise the real Telegram handler tree and monitoring scheduler
-through local fakes. After deployment, use this short smoke test against a private chat:
+The automated tests exercise the real Telegram handler tree — both typed messages and
+button taps — and the monitoring scheduler through local fakes. After deployment, use
+this short smoke test against a private chat:
 
-1. Type `/` and confirm the command menu appears, then send `/start` and `/status`.
-2. Add a known CoinGecko-listed mint with `/addtoken` and confirm its current price is
-   shown before it is saved.
-3. Add a rule whose condition is currently true and confirm exactly one Telegram alert
-   arrives after a poll; `/alerts` should show it as `firing`.
-4. Restart the daemon and confirm the rule remains `firing` without sending a duplicate.
-5. Confirm commands are refused in a group chat and that a blocked user loses access on
-   their next message, including during a guided flow.
+1. Send `/start`, confirm the main menu appears, and tap through 🚨 Alerts and
+   ⚙️ Status.
+2. Tap 🪙 Tokens → Add Token, paste a known CoinGecko-listed mint, and confirm its
+   current price is shown before you tap to save it.
+3. Create an alert entirely by tapping (🚨 Alerts → Create Alert) whose condition is
+   currently true, and confirm exactly one Telegram alert arrives after a poll; the
+   alert shows as 🔴 firing.
+4. Restart the daemon and confirm the rule remains firing without sending a duplicate.
+5. Confirm commands and taps are refused in a group chat, and that a blocked user loses
+   access on their next message or tap, including during a guided flow.
 
 ## License
 

@@ -68,8 +68,15 @@ pub async fn authorize(db: &Db, message: &Message) -> Result<Authorization> {
         return Ok(Authorization::Denied(DenyReason::NoSender));
     };
 
-    let telegram_id = sender.id.0 as i64;
+    authorize_id(db, sender.id.0 as i64).await
+}
 
+/// Resolves a bare Telegram user id against the users table.
+///
+/// Shared by message and callback handling: identity is the numeric id in both, and a
+/// tapped button must be re-authorized exactly like a typed message so a block takes
+/// effect immediately regardless of how the user is interacting.
+pub async fn authorize_id(db: &Db, telegram_id: i64) -> Result<Authorization> {
     let Some(user) = UserRepo::new(db).find_by_telegram_id(telegram_id).await? else {
         tracing::info!(telegram_id, "rejected update from unregistered user");
         return Ok(Authorization::Denied(DenyReason::NotRegistered));

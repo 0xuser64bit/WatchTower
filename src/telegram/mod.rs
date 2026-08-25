@@ -1,11 +1,14 @@
 //! The Telegram control plane.
 
 pub mod auth;
+pub mod callback;
 pub mod commands;
 pub mod copy;
 pub mod flows;
 pub mod menu;
 pub mod reply;
+pub mod screens;
+pub mod ui;
 
 use crate::app_state::AppState;
 use flows::{DialogueState, FlowDialogue};
@@ -20,9 +23,11 @@ type HandlerError = Box<dyn std::error::Error + Send + Sync>;
 #[derive(BotCommands, Clone, Debug, PartialEq)]
 #[command(rename_rule = "lowercase", description = "WatchTower commands")]
 pub enum Command {
-    #[command(description = "show the welcome message and command list")]
+    #[command(description = "open WatchTower")]
     Start,
-    #[command(description = "list commands")]
+    #[command(description = "open the menu")]
+    Menu,
+    #[command(description = "how it works")]
     Help,
     #[command(description = "engine and provider health")]
     Status,
@@ -86,6 +91,7 @@ pub fn schema() -> UpdateHandler<HandlerError> {
             },
         ))
         .branch(case![Command::Start].endpoint(commands::start))
+        .branch(case![Command::Menu].endpoint(commands::menu))
         .branch(case![Command::Help].endpoint(commands::help))
         .branch(case![Command::Status].endpoint(commands::status::status))
         .branch(case![Command::Cancel].endpoint(flows::cancel))
@@ -153,6 +159,10 @@ pub fn schema() -> UpdateHandler<HandlerError> {
 
     dialogue::enter::<Update, InMemStorage<DialogueState>, DialogueState, _>()
         .branch(message_handler)
+        // Callback queries share the same dialogue (keyed by chat), so a tapped button
+        // can advance the very flow a typed message started. Authorization and answering
+        // the query happen inside the handler.
+        .branch(callback::handler())
 }
 
 pub async fn run(state: AppState) {

@@ -6,15 +6,18 @@
 //! until the user starts that flow. Commands are evaluated before active steps and
 //! reset any abandoned flow.
 
+pub mod add_admin;
 pub mod add_alert;
 pub mod add_token;
 pub mod add_wallet;
 
 use crate::app_state::AppState;
 use crate::telegram::reply;
+use crate::telegram::ui::Surface;
 use teloxide::dispatching::dialogue::{Dialogue, InMemStorage};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
+use teloxide::types::CallbackQuery;
 
 pub type FlowDialogue = Dialogue<DialogueState, InMemStorage<DialogueState>>;
 pub type HandlerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
@@ -29,6 +32,7 @@ pub enum DialogueState {
     AddToken(add_token::Step),
     AddWallet(add_wallet::Step),
     AddAlert(add_alert::Step),
+    AddAdmin(add_admin::Step),
 }
 
 impl From<add_token::Step> for DialogueState {
@@ -49,6 +53,12 @@ impl From<add_alert::Step> for DialogueState {
     }
 }
 
+impl From<add_admin::Step> for DialogueState {
+    fn from(step: add_admin::Step) -> Self {
+        DialogueState::AddAdmin(step)
+    }
+}
+
 /// Handles the next message in an active flow. Never matches when idle.
 pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
     use dptree::case;
@@ -57,6 +67,25 @@ pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
         .branch(case![DialogueState::AddToken(step)].branch(add_token::handler()))
         .branch(case![DialogueState::AddWallet(step)].branch(add_wallet::handler()))
         .branch(case![DialogueState::AddAlert(step)].branch(add_alert::handler()))
+        .branch(case![DialogueState::AddAdmin(step)].branch(add_admin::handler()))
+}
+
+/// Routes an in-flow callback (`ac:`, `at:`, `aw:`, `ad:add…`) to the owning flow.
+pub async fn on_callback(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    current: DialogueState,
+    surface: Surface,
+    q: &CallbackQuery,
+    domain: &str,
+    rest: &[&str],
+) -> crate::error::Result<()> {
+    match domain {
+        "ac" => add_alert::on_callback(state, dialogue, current, surface, q, rest).await,
+        "at" => add_token::on_callback(state, dialogue, current, surface, q, rest).await,
+        "aw" => add_wallet::on_callback(state, dialogue, current, surface, q, rest).await,
+        _ => Ok(()),
+    }
 }
 
 /// Shared "reply and stop" used when a flow step receives something unusable. The
@@ -84,6 +113,7 @@ pub async fn cancel(state: AppState, current: DialogueState, msg: Message) -> Ha
         DialogueState::AddToken(_) => "Cancelled adding a token.",
         DialogueState::AddWallet(_) => "Cancelled adding a wallet.",
         DialogueState::AddAlert(_) => "Cancelled creating an alert.",
+        DialogueState::AddAdmin(_) => "Cancelled adding an admin.",
     };
 
     reply::send_text(&state.bot, msg.chat.id, text).await?;
