@@ -141,6 +141,71 @@ async fn a_pasted_address_is_answered_with_what_to_do_with_it() {
 }
 
 #[tokio::test]
+async fn history_re_renders_a_snapshot_in_the_same_words_as_the_alert() {
+    // History is rendered from the stored snapshot, not from a frozen message string,
+    // so it must speak the same vocabulary a delivered alert does.
+    use watchtower::db::repos::alert_events::AlertEventRepo;
+    use watchtower::db::repos::rules::{NewRuleTarget, RuleRepo};
+    use watchtower::db::repos::tokens::TokenRepo;
+    use watchtower::rules::types::Operator;
+
+    let mut server = mockito::Server::new_async().await;
+
+    let rendered = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("SOL")),
+            Matcher::Regex(regex::escape("at or below $104.8")),
+            Matcher::Regex(regex::escape("$104.76")),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db.clone(),
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    let token = TokenRepo::new(&db)
+        .create("So11111111111111111111111111111111111111112", Some("SOL"))
+        .await
+        .unwrap();
+    let rule = RuleRepo::new(&db)
+        .create(
+            NewRuleTarget::Token { id: token.id },
+            Operator::Lte,
+            104.8,
+            0,
+        )
+        .await
+        .unwrap();
+    AlertEventRepo::new(&db)
+        .record(&rule, 104.76, Some(104.8), chrono::Utc::now())
+        .await
+        .unwrap();
+
+    support::dispatch(
+        &state,
+        InMemStorage::<DialogueState>::new(),
+        support::message("/history"),
+    )
+    .await
+    .expect("dispatch");
+
+    rendered.assert_async().await;
+}
+
+#[tokio::test]
 async fn unregistered_users_are_refused_without_revealing_anything() {
     let mut server = mockito::Server::new_async().await;
 

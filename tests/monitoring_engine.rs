@@ -480,6 +480,100 @@ async fn alerts_are_recorded_even_when_no_admin_can_receive_them() {
 }
 
 #[tokio::test]
+async fn a_delivered_alert_reads_as_a_sentence_rather_than_a_field_dump() {
+    // The wording is what an admin actually receives as a push notification, so it is
+    // asserted on the outgoing request rather than only on the formatter.
+    let mut server = mockito::Server::new_async().await;
+
+    let delivered = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("SOL is at or below $104.8")),
+            Matcher::Regex(regex::escape("Price now: $104.76")),
+            Matcher::Regex(regex::escape("alert #1")),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let price = Arc::new(support::FakePriceProvider::with_price(MINT, 104.76));
+    let chain = Arc::new(support::FakeChainProvider::new());
+    let state = support::app_state(db, &server.url(), price, chain);
+
+    let token = TokenRepo::new(&state.db)
+        .create(MINT, Some("SOL"))
+        .await
+        .unwrap();
+    RuleRepo::new(&state.db)
+        .create(
+            NewRuleTarget::Token { id: token.id },
+            Operator::Lte,
+            104.8,
+            0,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(scheduler::tick(&state).await.unwrap().alerts_sent, 1);
+    delivered.assert_async().await;
+}
+
+#[tokio::test]
+async fn a_delivered_percentage_alert_leads_with_the_move() {
+    let mut server = mockito::Server::new_async().await;
+
+    let delivered = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("BONK is down 15%")),
+            Matcher::Regex(regex::escape("Price now: $85, from $100")),
+            Matcher::Regex(regex::escape("Alert fires on a 10% drop")),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let price = Arc::new(support::FakePriceProvider::with_price(MINT, 100.0));
+    let chain = Arc::new(support::FakeChainProvider::new());
+    let state = support::app_state(db, &server.url(), price.clone(), chain);
+
+    let token = TokenRepo::new(&state.db)
+        .create(MINT, Some("BONK"))
+        .await
+        .unwrap();
+    RuleRepo::new(&state.db)
+        .create(
+            NewRuleTarget::Token { id: token.id },
+            Operator::PctDown,
+            10.0,
+            0,
+        )
+        .await
+        .unwrap();
+
+    // First tick only takes the baseline; the drop is the second.
+    scheduler::tick(&state).await.unwrap();
+    price.set(MINT, Ok(85.0));
+    assert_eq!(scheduler::tick(&state).await.unwrap().alerts_sent, 1);
+
+    delivered.assert_async().await;
+}
+
+#[tokio::test]
 async fn history_pruning_respects_the_retention_window() {
     let h = harness().await;
     let token = TokenRepo::new(&h.state.db)

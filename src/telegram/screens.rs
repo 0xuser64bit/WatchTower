@@ -12,7 +12,7 @@
 
 use crate::alerts::format;
 use crate::app_state::AppState;
-use crate::db::repos::alert_events::AlertEventRepo;
+use crate::db::repos::alert_events::{AlertEvent, AlertEventRepo};
 use crate::db::repos::rules::RuleRepo;
 use crate::db::repos::tokens::TokenRepo;
 use crate::db::repos::users::{Role, User, UserRepo};
@@ -32,35 +32,12 @@ const PAGE_SIZE: usize = 6;
 /// A short, human name for a rule's target: its label if it has one, otherwise a
 /// shortened address.
 fn target_short(rule: &Rule) -> String {
-    match &rule.target.label {
-        Some(label) => label.clone(),
-        None => abbreviate(&rule.target.reference),
-    }
-}
-
-/// A value with its unit, e.g. `$0.0000025` or `2 SOL`.
-pub(crate) fn valued(kind: TargetKind, value: f64) -> String {
-    match kind {
-        TargetKind::Token => format!("${}", format::amount(value)),
-        TargetKind::Wallet => format!("{} SOL", format::amount(value)),
-    }
+    rule.target.name()
 }
 
 /// A plain-language rendering of a rule's condition, e.g. `below $0.99` or `up 10%`.
 fn condition_phrase(rule: &Rule) -> String {
-    condition_from(rule.target.kind, rule.operator, rule.threshold)
-}
-
-/// The condition phrase from raw parts, for use before a [`Rule`] exists (mid-flow).
-pub(crate) fn condition_from(kind: TargetKind, operator: Operator, threshold: f64) -> String {
-    match operator {
-        Operator::Gt => format!("above {}", valued(kind, threshold)),
-        Operator::Lt => format!("below {}", valued(kind, threshold)),
-        Operator::Gte => format!("at or above {}", valued(kind, threshold)),
-        Operator::Lte => format!("at or below {}", valued(kind, threshold)),
-        Operator::PctUp => format!("up {}%", format::amount(threshold)),
-        Operator::PctDown => format!("down {}%", format::amount(threshold)),
-    }
+    format::condition(rule.target.kind, rule.operator, rule.threshold)
 }
 
 /// 🟢 armed · 🔴 firing · ⚪ disabled — the at-a-glance state of a rule.
@@ -234,7 +211,7 @@ fn alert_detail_text(rule: &Rule, poll_seconds: u64) -> String {
     if let Some(last) = rule.last_value {
         lines.push(format!(
             "<b>Last reading:</b> {}",
-            esc(&valued(rule.target.kind, last))
+            esc(&format::valued(rule.target.kind, last))
         ));
     }
 
@@ -242,7 +219,7 @@ fn alert_detail_text(rule: &Rule, poll_seconds: u64) -> String {
         match rule.reference_value {
             Some(baseline) => lines.push(format!(
                 "<b>Baseline:</b> {}",
-                esc(&valued(rule.target.kind, baseline))
+                esc(&format::valued(rule.target.kind, baseline))
             )),
             None => lines.push("<b>Baseline:</b> set on next reading".to_string()),
         }
@@ -533,41 +510,7 @@ pub async fn show_history(state: &AppState, surface: Surface, page: usize) -> Re
 
     let body = visible
         .iter()
-        .map(|event| {
-            let unit = event.kind().map(|kind| kind.unit()).unwrap_or("");
-            let target = event
-                .target_label
-                .clone()
-                .unwrap_or_else(|| abbreviate(&event.target_ref));
-
-            let comparison = match Operator::parse(&event.operator) {
-                Some(operator) if operator.is_percentage() => match event.reference_value {
-                    Some(baseline) => format::change_pct(event.observed_value, baseline)
-                        .map(|pct| {
-                            format!("{} from {}", format::percent(pct), format::amount(baseline))
-                        })
-                        .unwrap_or_else(|| format!("{}%", format::amount(event.threshold_value))),
-                    None => format!("{}%", format::amount(event.threshold_value)),
-                },
-                Some(operator) => {
-                    format!(
-                        "{} {}",
-                        operator.symbol(),
-                        format::amount(event.threshold_value)
-                    )
-                }
-                None => format::amount(event.threshold_value),
-            };
-
-            format!(
-                "🔔 <b>{}</b>\n{}\n{} {} ({})",
-                esc(&target),
-                esc(&format::timestamp(event.triggered_at)),
-                esc(&format::amount(event.observed_value)),
-                esc(unit),
-                esc(&comparison)
-            )
-        })
+        .map(history_entry)
         .collect::<Vec<_>>()
         .join("\n\n");
 
@@ -579,6 +522,55 @@ pub async fn show_history(state: &AppState, surface: Surface, page: usize) -> Re
 
     let text = format!("<b>📜 Alert History</b>\n\n{body}");
     ui::render(&state.bot, surface, Screen::new(text, rows)).await
+}
+
+/// One history entry, worded like the alert that was delivered at the time.
+///
+/// History is re-rendered from the stored snapshot rather than replayed from a frozen
+/// string, so a wording change reaches old entries too. A snapshot this build cannot
+/// interpret degrades to bare numbers rather than being hidden: a fired alert must stay
+/// visible even if its operator no longer exists.
+fn history_entry(event: &AlertEvent) -> String {
+    let target = event
+        .target_label
+        .clone()
+        .unwrap_or_else(|| abbreviate(&event.target_ref));
+
+    let operator = Operator::parse(&event.operator);
+    let moved = operator
+        .filter(|operator| operator.is_percentage())
+        .and(event.reference_value)
+        .and_then(|baseline| format::change_pct(event.observed_value, baseline));
+
+    let (headline, reading) = match (event.kind(), operator) {
+        (Some(kind), Some(operator)) => {
+            let headline = match moved {
+                Some(pct) => format::moved(pct),
+                None => format::condition(kind, operator, event.threshold_value),
+            };
+            let reading = match event.reference_value.filter(|_| moved.is_some()) {
+                Some(baseline) => format!(
+                    "{}, from {}",
+                    format::valued(kind, event.observed_value),
+                    format::valued(kind, baseline)
+                ),
+                None => format::valued(kind, event.observed_value),
+            };
+            (headline, reading)
+        }
+        _ => (
+            format::amount(event.threshold_value),
+            format::amount(event.observed_value),
+        ),
+    };
+
+    format!(
+        "🔔 <b>{}</b> · {}\n{}\n{}",
+        esc(&target),
+        esc(&headline),
+        esc(&reading),
+        esc(&format::timestamp_short(event.triggered_at))
+    )
 }
 
 // ── Status ──────────────────────────────────────────────────────────────────────────

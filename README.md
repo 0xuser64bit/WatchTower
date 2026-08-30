@@ -33,6 +33,29 @@ quiet until the condition clears. Percentage rules use a rolling baseline that i
 on the first observation and reset after each firing. If a provider is unavailable, the
 rule keeps its stored state instead of being incorrectly re-armed.
 
+A delivered alert arrives as a push notification, so it leads with what happened and
+adds only what the headline does not already say:
+
+```text
+⬇️ SOL is at or below $104.8
+
+Price now: $104.76
+2026-08-30 09:26 UTC · alert #2
+```
+
+```text
+📉 BONK is down 15%
+
+Price now: $0.0000212, from $0.000025
+Alert fires on a 10% drop
+2026-08-30 09:26 UTC · alert #4
+```
+
+The target is named once — by its short name, or by its abbreviated address when it has
+none — and conditions are worded the same way the buttons that created them are, so
+`<= 104.8 USD` never appears anywhere. Screens, `/history`, and command replies render
+through the same vocabulary, so a rule reads identically wherever it appears.
+
 ## Using It
 
 WatchTower is a small menu-driven app inside a private Telegram chat. Send `/start`
@@ -243,7 +266,8 @@ providers (CoinGecko, Solana RPC) <- engine (poll, evaluate, dispatch) -> Telegr
 - `rules`: pure rule types and evaluation logic.
 - `providers`: CoinGecko price reads and batched Solana balance reads with retry and
   endpoint failover.
-- `alerts`: structured history records and plain-text Telegram delivery.
+- `alerts`: the rendering vocabulary shared by every surface (values, conditions,
+  timestamps), structured history records, and plain-text Telegram delivery.
 - `db`: SQLite pool, migrations, repositories, and relational constraints.
 
 SQLite enforces the important data invariants: a rule has exactly one target, targets

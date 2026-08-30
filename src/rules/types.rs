@@ -125,11 +125,15 @@ pub struct RuleTarget {
 }
 
 impl RuleTarget {
-    /// Short, human-first identification: the label when known, otherwise a
-    /// truncated address (full base58 addresses make chat output unreadable).
-    pub fn display(&self) -> String {
+    /// The single name to call this target in a sentence.
+    ///
+    /// A label when the user gave one, otherwise the abbreviated address — full base58
+    /// makes chat output unreadable, and there is nothing more identifying to use.
+    /// Deliberately never both: an alert that says `SOL (So11…1112)` spends its most
+    /// readable line repeating an address the label already resolves to.
+    pub fn name(&self) -> String {
         match &self.label {
-            Some(label) => format!("{label} ({})", abbreviate(&self.reference)),
+            Some(label) => label.clone(),
             None => abbreviate(&self.reference),
         }
     }
@@ -191,25 +195,17 @@ pub struct Rule {
 }
 
 impl Rule {
-    /// One-line description, e.g. `SOL balance < 5 SOL`.
+    /// One-line description of what this rule watches for, e.g. `balance at or below
+    /// 5 SOL`.
+    ///
+    /// Delegates the condition to [`crate::alerts::format::condition`] so a rule reads
+    /// identically in a command reply, on a screen, and in a delivered alert.
     pub fn condition(&self) -> String {
-        let unit = self.target.kind.unit();
-        if self.operator.is_percentage() {
-            format!(
-                "{} {} {}%",
-                self.target.kind.metric(),
-                self.operator.symbol(),
-                crate::alerts::format::amount(self.threshold)
-            )
-        } else {
-            format!(
-                "{} {} {} {}",
-                self.target.kind.metric(),
-                self.operator.symbol(),
-                crate::alerts::format::amount(self.threshold),
-                unit
-            )
-        }
+        format!(
+            "{} {}",
+            self.target.kind.metric(),
+            crate::alerts::format::condition(self.target.kind, self.operator, self.threshold)
+        )
     }
 }
 
@@ -385,19 +381,45 @@ mod tests {
     }
 
     #[test]
-    fn target_display_prefers_label() {
+    fn a_target_is_named_once_by_its_label_or_its_address() {
         let target = RuleTarget {
             kind: TargetKind::Token,
             id: 1,
             reference: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".into(),
             label: Some("USDC".into()),
         };
-        assert_eq!(target.display(), "USDC (EPjF…Dt1v)");
+        // Not "USDC (EPjF…Dt1v)": the label already resolves the address.
+        assert_eq!(target.name(), "USDC");
 
         let unlabelled = RuleTarget {
             label: None,
             ..target
         };
-        assert_eq!(unlabelled.display(), "EPjF…Dt1v");
+        assert_eq!(unlabelled.name(), "EPjF…Dt1v");
+    }
+
+    #[test]
+    fn a_condition_reads_as_a_phrase_in_the_targets_unit() {
+        let mut rule = Rule::try_from(row()).unwrap();
+        rule.operator = Operator::Lte;
+        rule.threshold = 104.8;
+        assert_eq!(rule.condition(), "price at or below $104.8");
+
+        rule.operator = Operator::PctDown;
+        rule.threshold = 10.0;
+        assert_eq!(rule.condition(), "price down 10%");
+
+        let wallet = Rule {
+            target: RuleTarget {
+                kind: TargetKind::Wallet,
+                id: 1,
+                reference: "So11111111111111111111111111111111111111112".into(),
+                label: None,
+            },
+            operator: Operator::Lt,
+            threshold: 5.0,
+            ..rule
+        };
+        assert_eq!(wallet.condition(), "balance below 5 SOL");
     }
 }

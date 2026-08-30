@@ -61,9 +61,9 @@ async fn toggle_rule(state: &AppState, msg: &Message, id: i64, enabled: bool) ->
         &state.bot,
         msg.chat.id,
         format!(
-            "Rule {} ({} {}) {verb}.{note}",
+            "Alert #{} {verb} — {} {}.{note}",
             rule.id,
-            rule.target.display(),
+            rule.target.name(),
             rule.condition()
         ),
     )
@@ -91,12 +91,7 @@ async fn remove_rule(state: &AppState, msg: &Message, id: i64) -> Result<()> {
     let repo = RuleRepo::new(&state.db);
 
     let Some(rule) = repo.find(id).await? else {
-        reply::send_text(
-            &state.bot,
-            msg.chat.id,
-            format!("No alert rule with id {id}."),
-        )
-        .await?;
+        reply::send_text(&state.bot, msg.chat.id, format!("No alert with id {id}.")).await?;
         return Ok(());
     };
 
@@ -106,9 +101,9 @@ async fn remove_rule(state: &AppState, msg: &Message, id: i64) -> Result<()> {
         &state.bot,
         msg.chat.id,
         format!(
-            "Deleted rule {} ({} {}). Past alerts stay in /history.",
+            "Alert #{} deleted — {} {}. Past firings stay in /history.",
             rule.id,
-            rule.target.display(),
+            rule.target.name(),
             rule.condition()
         ),
     )

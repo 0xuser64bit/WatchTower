@@ -10,6 +10,7 @@
 //! handlers edit the tapped message in place. The target is always chosen from tracked
 //! tokens and wallets, so a rule can never point at an untracked address.
 
+use crate::alerts::format;
 use crate::app_state::AppState;
 use crate::db::repos::rules::{NewRuleTarget, RuleRepo};
 use crate::db::repos::tokens::TokenRepo;
@@ -21,7 +22,7 @@ use crate::telegram::flows::{
     is_affirmative, reprompt, text_of, DialogueState, FlowDialogue, HandlerResult,
 };
 use crate::telegram::ui::{self, button, esc, Screen, Surface};
-use crate::telegram::{copy, reply, screens};
+use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
 use teloxide::types::{CallbackQuery, InlineKeyboardButton};
@@ -652,7 +653,7 @@ async fn present_confirm(
     cooldown_seconds: i64,
 ) -> Result<()> {
     let target = target_line(state, kind, target_id).await?;
-    let condition = screens::condition_from(kind, operator, threshold);
+    let condition = format::condition(kind, operator, threshold);
     let summary = copy::confirm_alert(&target, &condition, cooldown_seconds);
 
     let rows = vec![
@@ -722,8 +723,8 @@ async fn create(
         Ok(rule) => {
             let line = target_line(state, kind, target_id)
                 .await
-                .unwrap_or_else(|_| esc(&rule.target.display()));
-            let condition = screens::condition_from(kind, operator, threshold);
+                .unwrap_or_else(|_| esc(&rule.target.name()));
+            let condition = format::condition(kind, operator, threshold);
             let text = copy::alert_saved(&line, &condition, state.settings.poll_interval.as_secs());
             let rows = vec![vec![
                 button("🚨 View Alerts", "al"),
