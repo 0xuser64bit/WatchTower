@@ -180,7 +180,8 @@ pub const EMPTY_TOKENS: &str = concat!(
     "\n",
     "No tokens yet.\n",
     "\n",
-    "Add a token by its mint address to watch its price in USD."
+    "Pick a well-known one from ⭐ Popular, or add any token by its mint\n",
+    "address, to watch its price in USD."
 );
 
 pub const TOKEN_GONE: &str = "That token is no longer tracked.";
@@ -223,12 +224,55 @@ pub const NOT_A_PRIVATE_CHAT: &str = concat!(
 pub const ASK_MINT: &str = concat!(
     "<b>Add a token</b>\n",
     "\n",
-    "Which token? Paste its mint address — 32-44 letters and numbers,\n",
-    "shown on any Solana explorer or on CoinGecko.\n",
+    "Tap ⭐ Popular to pick a well-known token, or paste a mint address —\n",
+    "32-44 letters and numbers, shown on any Solana explorer.\n",
     "\n",
     "USDC, for example:\n",
     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 );
+
+// ── The built-in token catalog ──────────────────────────────────────────────────────
+
+pub const PICK_GROUP: &str = concat!(
+    "<b>⭐ Popular tokens</b>\n",
+    "\n",
+    "Pick a category, then the token. Mint addresses are built into\n",
+    "WatchTower, so there is nothing to look up or paste.\n",
+    "\n",
+    "Anything not listed can still be added by pasting its mint."
+);
+
+pub fn pick_token(group_label: &str) -> String {
+    format!(
+        concat!(
+            "<b>{0}</b>\n",
+            "\n",
+            "Tap a token to check its price and start tracking it."
+        ),
+        group_label
+    )
+}
+
+/// Shown when a catalog pick turns out to already be tracked.
+pub fn already_tracking(display: &str) -> String {
+    format!("Already tracking <b>{0}</b>.", display)
+}
+
+/// The catalog equivalent of [`NOT_PRICED`]. The address came from WatchTower, so
+/// telling the user to check it would send them looking for a mistake they did not make.
+pub fn catalog_not_priced(symbol: &str) -> String {
+    format!(
+        concat!(
+            "<b>No price found</b>\n",
+            "\n",
+            "The price provider has no USD price for {0} right now, so an\n",
+            "alert on it could never fire — so I'm not adding it.\n",
+            "\n",
+            "Try again later, or pick another token."
+        ),
+        symbol
+    )
+}
 
 pub const BAD_ADDRESS: &str = concat!(
     "That doesn't look like a Solana address. They're 32-44 letters and\n",
@@ -253,6 +297,20 @@ pub fn ask_token_name(price_line: &str) -> String {
             "or tap Skip to just use the address."
         ),
         price_line
+    )
+}
+
+/// The naming prompt for a mint the catalog recognises: Skip has a better answer than
+/// the address, so it is offered by name.
+pub fn ask_token_name_known(price_line: &str, symbol: &str) -> String {
+    format!(
+        concat!(
+            "{0}\n",
+            "\n",
+            "I know this one as <b>{1}</b> — tap Use {1} to keep that, or send\n",
+            "your own short name."
+        ),
+        price_line, symbol
     )
 }
 
@@ -448,9 +506,17 @@ mod tests {
             ("not_a_command", NOT_A_COMMAND.into()),
             ("not_private", NOT_A_PRIVATE_CHAT.into()),
             ("ask_mint", ASK_MINT.into()),
+            ("pick_group", PICK_GROUP.into()),
+            ("pick_token", pick_token("🐕 Memecoins")),
+            ("already_tracking", already_tracking("USDC")),
+            ("catalog_not_priced", catalog_not_priced("BONK")),
             ("bad_address", BAD_ADDRESS.into()),
             ("not_priced", NOT_PRICED.into()),
             ("ask_token_name", ask_token_name("Current price: 1 USD.")),
+            (
+                "ask_token_name_known",
+                ask_token_name_known("Current price: 1 USD.", "USDC"),
+            ),
             (
                 "ask_wallet_name",
                 ask_wallet_name("Current balance: 2.5 SOL."),

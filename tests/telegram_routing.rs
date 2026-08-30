@@ -102,7 +102,14 @@ async fn admin_commands_reach_their_handlers() {
 
 #[tokio::test]
 async fn addtoken_starts_the_flow_rather_than_consuming_the_command() {
-    assert_reply_contains("/addtoken", "Which token?").await;
+    assert_reply_contains("/addtoken", "Add a token").await;
+}
+
+#[tokio::test]
+async fn addtoken_offers_the_builtin_catalog_as_well_as_pasting() {
+    // A mint address is immutable, so the well-known ones are built in; the prompt
+    // must say so rather than only asking for an address.
+    assert_reply_contains("/addtoken", "Popular").await;
 }
 
 #[tokio::test]

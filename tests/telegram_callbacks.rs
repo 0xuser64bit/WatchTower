@@ -24,6 +24,7 @@ struct Session {
     _server: mockito::ServerGuard,
     state: watchtower::app_state::AppState,
     storage: Arc<InMemStorage<DialogueState>>,
+    price: Arc<support::FakePriceProvider>,
 }
 
 impl Session {
@@ -58,13 +59,19 @@ impl Session {
         let db = support::database().await;
         let price = Arc::new(support::FakePriceProvider::with_price(MINT, 1.0));
         let chain = Arc::new(support::FakeChainProvider::new());
-        let state = support::app_state(db, &server.url(), price, chain);
+        let state = support::app_state(db, &server.url(), price.clone(), chain);
 
         Self {
             _server: server,
             state,
             storage: InMemStorage::new(),
+            price,
         }
+    }
+
+    /// The scripted price provider behind this session.
+    fn state_price(&self) -> &support::FakePriceProvider {
+        &self.price
     }
 
     async fn tap(&self, data: &str) {
@@ -218,14 +225,187 @@ async fn a_token_can_be_added_by_tapping_through_the_flow() {
 
     session.tap("at:new").await;
     session.send(MINT).await; // paste the address
-    session.tap("at:sk").await; // skip naming
+    session.tap("at:us").await; // accept the catalog's name for a known mint
     session.tap("at:ok").await; // confirm
 
     let tokens = TokenRepo::new(&session.state.db).list().await.unwrap();
     assert_eq!(tokens.len(), 1);
     assert_eq!(tokens[0].mint_address, MINT);
-    assert_eq!(tokens[0].symbol, None);
+    // USDC is in the built-in catalog, so the reviewed symbol is offered by name
+    // rather than leaving a well-known token unnamed.
+    assert_eq!(tokens[0].symbol.as_deref(), Some("USDC"));
     assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+/// The whole point of the catalog: a well-known token with nothing typed at all.
+#[tokio::test]
+async fn a_popular_token_can_be_added_without_typing_anything() {
+    let session = Session::new().await;
+
+    // Add Token → ⭐ Popular → SOL & stablecoins → USDC → Use USDC → confirm.
+    session.tap("at:new").await;
+    session.tap("at:pop").await;
+    session.tap("at:g:c").await;
+    let index = catalog_index("USDC");
+    session.tap(&format!("at:p:{index}")).await;
+    session.tap("at:us").await;
+    session.tap("at:ok").await;
+
+    let tokens = TokenRepo::new(&session.state.db).list().await.unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].mint_address, MINT);
+    assert_eq!(tokens[0].symbol.as_deref(), Some("USDC"));
+    assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+/// The catalog is reachable from the Tokens screen, not only from inside the flow.
+#[tokio::test]
+async fn the_catalog_is_reachable_from_the_tokens_screen() {
+    let session = Session::new().await;
+
+    session.tap("tk").await;
+    session.tap("at:pop").await;
+    session.tap("at:g:c").await;
+    session
+        .tap(&format!("at:p:{}", catalog_index("USDC")))
+        .await;
+    session.tap("at:us").await;
+    session.tap("at:ok").await;
+
+    assert_eq!(
+        TokenRepo::new(&session.state.db)
+            .list()
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn a_catalog_pick_is_still_price_verified_before_being_stored() {
+    let session = Session::new().await;
+    // BONK is in the catalog but this fake provider only prices USDC, so the pick
+    // must be refused rather than stored as a token whose alerts could never fire.
+    let bonk = catalog_index("BONK");
+
+    session.tap("at:pop").await;
+    session.tap("at:g:m").await;
+    session.tap(&format!("at:p:{bonk}")).await;
+
+    assert!(
+        TokenRepo::new(&session.state.db)
+            .list()
+            .await
+            .unwrap()
+            .is_empty(),
+        "an unpriced catalog token must not be stored"
+    );
+    assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+#[tokio::test]
+async fn an_out_of_range_catalog_index_stores_nothing() {
+    let session = Session::new().await;
+
+    // A stale or hand-crafted button must not be able to reach past the catalog.
+    session.tap("at:pop").await;
+    session
+        .tap(&format!("at:p:{}", watchtower::catalog::ENTRIES.len()))
+        .await;
+    session.tap("at:p:999999").await;
+    session.tap("at:p:not-a-number").await;
+    session.tap("at:g:zz").await;
+
+    assert!(TokenRepo::new(&session.state.db)
+        .list()
+        .await
+        .unwrap()
+        .is_empty());
+    assert!(matches!(
+        session.dialogue_state().await,
+        DialogueState::AddToken(watchtower::telegram::flows::add_token::Step::AwaitingMint)
+    ));
+}
+
+#[tokio::test]
+async fn a_catalog_pick_that_is_already_tracked_exits_cleanly() {
+    let session = Session::new().await;
+    TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+
+    session.tap("at:pop").await;
+    session.tap("at:g:c").await;
+    session
+        .tap(&format!("at:p:{}", catalog_index("USDC")))
+        .await;
+
+    assert_eq!(
+        TokenRepo::new(&session.state.db)
+            .list()
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "the token must not be duplicated"
+    );
+    assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+#[tokio::test]
+async fn a_blocked_user_cannot_add_a_catalog_token() {
+    let session = Session::new().await;
+
+    UserRepo::new(&session.state.db)
+        .set_blocked(support::ADMIN_ID, true)
+        .await
+        .unwrap();
+
+    session.tap("at:pop").await;
+    session.tap("at:g:c").await;
+    session
+        .tap(&format!("at:p:{}", catalog_index("USDC")))
+        .await;
+    session.tap("at:us").await;
+    session.tap("at:ok").await;
+
+    assert!(
+        TokenRepo::new(&session.state.db)
+            .list()
+            .await
+            .unwrap()
+            .is_empty(),
+        "the catalog must not be a way around authorization"
+    );
+}
+
+/// A mint the catalog does not know still gets the plain Skip path.
+#[tokio::test]
+async fn an_unknown_mint_is_still_offered_the_skip_button() {
+    let session = Session::new().await;
+    const UNKNOWN: &str = "CZecYkamnAJKs6g2s4uoykkrstweT6XWu5zi9bdJiaS8";
+    session.state_price().set(UNKNOWN, Ok(3.5));
+
+    session.tap("at:new").await;
+    session.send(UNKNOWN).await;
+    session.tap("at:sk").await;
+    session.tap("at:ok").await;
+
+    let tokens = TokenRepo::new(&session.state.db).list().await.unwrap();
+    assert_eq!(tokens.len(), 1);
+    assert_eq!(tokens[0].mint_address, UNKNOWN);
+    assert_eq!(tokens[0].symbol, None);
+}
+
+/// The index a button carries for `symbol`. Looked up rather than hard-coded so the
+/// tests keep testing the flow when the catalog grows.
+fn catalog_index(symbol: &str) -> usize {
+    watchtower::catalog::ENTRIES
+        .iter()
+        .position(|entry| entry.symbol == symbol)
+        .unwrap_or_else(|| panic!("{symbol} is not in the catalog"))
 }
 
 #[tokio::test]

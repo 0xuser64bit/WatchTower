@@ -13,6 +13,7 @@
 pub mod alerts;
 pub mod app;
 pub mod app_state;
+pub mod catalog;
 pub mod cli;
 pub mod config;
 pub mod db;

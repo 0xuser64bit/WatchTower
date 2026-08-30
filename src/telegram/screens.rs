@@ -149,7 +149,7 @@ pub async fn show_help(state: &AppState, surface: Surface) -> Result<()> {
     let rows = vec![
         vec![button("🚨 Create Alert", "ac:new")],
         vec![
-            button("🪙 Add Token", "at:new"),
+            button("⭐ Popular Tokens", "at:pop"),
             button("👛 Add Wallet", "aw:new"),
         ],
         menu_row(),
@@ -309,7 +309,11 @@ pub async fn show_tokens(state: &AppState, surface: Surface, page: usize) -> Res
     let tokens = TokenRepo::new(&state.db).list().await?;
 
     if tokens.is_empty() {
-        let rows = vec![vec![button("➕ Add Token", "at:new")], menu_row()];
+        let rows = vec![
+            vec![button("⭐ Popular", "at:pop")],
+            vec![button("➕ Add Token", "at:new")],
+            menu_row(),
+        ];
         return ui::render(&state.bot, surface, Screen::new(copy::EMPTY_TOKENS, rows)).await;
     }
 
@@ -331,7 +335,10 @@ pub async fn show_tokens(state: &AppState, surface: Surface, page: usize) -> Res
     if let Some(row) = pager("tk", page, tokens.len()) {
         rows.push(row);
     }
-    rows.push(vec![button("➕ Add Token", "at:new")]);
+    rows.push(vec![
+        button("⭐ Popular", "at:pop"),
+        button("➕ Add Token", "at:new"),
+    ]);
     rows.push(menu_row());
 
     let text = format!(

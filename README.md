@@ -19,6 +19,15 @@ Rules support `>`, `<`, `>=`, `<=`, `%up`, and `%down`. Values are sampled every
 than transaction or mempool monitoring. An unlisted token cannot be tracked, but a
 temporary price-provider outage does not block saving a valid mint.
 
+Because a mint address never changes and WatchTower is Solana-only, the well-known
+mints are compiled in: **⭐ Popular** offers SOL and the stablecoins, liquid staking
+tokens, DeFi and infra tokens, memecoins, and bridged assets, grouped and tappable, so
+the common case needs no address lookup. The list is data in
+[src/catalog.rs](src/catalog.rs), never a runtime lookup, so no third party can point a
+familiar symbol at a different mint; changing an address takes a reviewed commit. A
+pick is only a shortcut for supplying the address — it is price-verified and confirmed
+like any pasted mint — and anything not listed is still added by pasting its mint.
+
 Alerts are edge-triggered: a rule fires when its condition becomes true and stays
 quiet until the condition clears. Percentage rules use a rolling baseline that is set
 on the first observation and reset after each firing. If a provider is unavailable, the
@@ -72,7 +81,7 @@ listing, but tapping is the primary path.
 | `/help` | How it works, with buttons into the common actions |
 | `/status` | Engine, provider, database, and recipient health |
 | `/cancel` | Leave an active guided flow |
-| `/addtoken` | Verify and track a token mint |
+| `/addtoken` | Pick a popular token, or verify and track any mint |
 | `/tokens` | Tracked tokens screen |
 | `/deletetoken <id>` | Remove a token and its rules |
 | `/addwallet` | Verify and track a wallet address |
@@ -226,6 +235,9 @@ providers (CoinGecko, Solana RPC) <- engine (poll, evaluate, dispatch) -> Telegr
 - `telegram`: private-chat routing for both messages and callback queries,
   authorization, the screen renderers and inline keyboards (`screens`, `ui`,
   `callback`), guided `flows`, user-facing `copy`, and all mutations.
+- `catalog`: the compiled-in directory of well-known Solana mints behind ⭐ Popular.
+  Reviewed data, not a runtime lookup, and a shortcut for supplying an address rather
+  than a way around verification.
 - `engine`: interval scheduling, provider reads, rule evaluation, persistence, and
   runtime health.
 - `rules`: pure rule types and evaluation logic.
@@ -266,7 +278,8 @@ cargo test
 ```
 
 The ignored provider test uses live CoinGecko and Solana endpoints and is intentionally
-separate from the offline suite:
+separate from the offline suite. It also re-checks every catalog mint against mainnet,
+which is the one thing a reviewer cannot verify by eye:
 
 ```bash
 cargo test --test live_providers -- --ignored
@@ -278,8 +291,8 @@ this short smoke test against a private chat:
 
 1. Send `/start`, confirm the main menu appears, and tap through 🚨 Alerts and
    ⚙️ Status.
-2. Tap 🪙 Tokens → Add Token, paste a known CoinGecko-listed mint, and confirm its
-   current price is shown before you tap to save it.
+2. Tap 🪙 Tokens → ⭐ Popular, pick a token, and confirm its current price is shown
+   before you tap to save it. Then repeat with Add Token and a pasted mint.
 3. Create an alert entirely by tapping (🚨 Alerts → Create Alert) whose condition is
    currently true, and confirm exactly one Telegram alert arrives after a poll; the
    alert shows as 🔴 firing.

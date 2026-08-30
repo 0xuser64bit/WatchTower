@@ -116,6 +116,71 @@ async fn batches_real_balances_and_treats_missing_accounts_as_zero() {
     );
 }
 
+#[tokio::test]
+#[ignore = "requires network access to a Solana RPC endpoint"]
+async fn every_catalog_mint_is_an_initialised_mint_on_mainnet() {
+    // The catalog is offered as trustworthy, compiled-in data: a transposed character
+    // would ship a button that can never work, and the failure would look like a
+    // provider outage rather than a bad address. This is the check that a reviewer
+    // cannot do by eye.
+    use serde_json::{json, Value};
+
+    let mints: Vec<&str> = watchtower::catalog::ENTRIES
+        .iter()
+        .map(|entry| entry.mint)
+        .collect();
+
+    let client = reqwest::Client::builder()
+        .timeout(timeout())
+        .build()
+        .unwrap();
+    let response: Value = client
+        .post("https://api.mainnet-beta.solana.com")
+        .json(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getMultipleAccounts",
+            "params": [mints, { "encoding": "jsonParsed" }],
+        }))
+        .send()
+        .await
+        .expect("rpc request")
+        .json()
+        .await
+        .expect("rpc json");
+
+    let accounts = response["result"]["value"]
+        .as_array()
+        .unwrap_or_else(|| panic!("unexpected rpc response: {response}"));
+    assert_eq!(accounts.len(), mints.len());
+
+    for (entry, account) in watchtower::catalog::ENTRIES.iter().zip(accounts) {
+        assert!(
+            !account.is_null(),
+            "{} ({}) has no account on mainnet",
+            entry.symbol,
+            entry.mint
+        );
+
+        let parsed = &account["data"]["parsed"];
+        assert_eq!(
+            parsed["type"], "mint",
+            "{} is not a mint account",
+            entry.symbol
+        );
+        assert_eq!(
+            parsed["info"]["isInitialized"], true,
+            "{} is an uninitialised mint",
+            entry.symbol
+        );
+
+        println!(
+            "{:>9}  decimals={}  {}",
+            entry.symbol, parsed["info"]["decimals"], entry.mint
+        );
+    }
+}
+
 /// One real monitoring cycle: real price API, real Solana RPC, real database, real
 /// evaluation and persistence. Telegram delivery is expected to fail (no valid token),
 /// which is itself worth exercising — a delivery failure must not lose the alert.

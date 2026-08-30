@@ -4,8 +4,14 @@
 //! with no USD listing can never satisfy a price rule, so accepting it would let the
 //! user build an alert that silently never fires. Naming and confirmation are tappable
 //! (Skip / Add), while the address itself is pasted as text.
+//!
+//! Because a mint address is immutable and WatchTower is Solana-only, the well-known
+//! ones are compiled in ([`crate::catalog`]) and offered as a browsable ⭐ Popular
+//! shortcut. A catalog pick is only a way to supply the address: it joins this same
+//! flow at the verification step and is confirmed by the user like any pasted mint.
 
 use crate::app_state::AppState;
+use crate::catalog::{self, Group};
 use crate::db::repos::tokens::TokenRepo;
 use crate::error::Result;
 use crate::providers::solana::is_valid_address;
@@ -18,7 +24,11 @@ use crate::telegram::ui::{self, button, menu_row, Screen, Surface};
 use crate::telegram::{copy, reply};
 use teloxide::dispatching::UpdateHandler;
 use teloxide::prelude::*;
-use teloxide::types::CallbackQuery;
+use teloxide::types::{CallbackQuery, InlineKeyboardButton};
+
+/// Tokens per row on a catalog group screen. Symbols are short, so two fit
+/// comfortably and the whole group stays visible without paging.
+const CATALOG_COLUMNS: usize = 2;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Step {
@@ -26,6 +36,9 @@ pub enum Step {
     AwaitingSymbol {
         mint: String,
         price: Option<f64>,
+        /// The catalog's reviewed symbol for this mint, when it has one. Offered as a
+        /// one-tap answer instead of leaving a well-known token unnamed.
+        suggested: Option<String>,
     },
     Confirming {
         mint: String,
@@ -38,7 +51,14 @@ pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
 
     dptree::entry()
         .branch(case![Step::AwaitingMint].endpoint(await_mint))
-        .branch(case![Step::AwaitingSymbol { mint, price }].endpoint(await_symbol))
+        .branch(
+            case![Step::AwaitingSymbol {
+                mint,
+                price,
+                suggested
+            }]
+            .endpoint(await_symbol),
+        )
         .branch(case![Step::Confirming { mint, symbol }].endpoint(confirm))
 }
 
@@ -59,7 +79,13 @@ pub async fn start_on(state: &AppState, dialogue: &FlowDialogue, surface: Surfac
     ui::render(
         &state.bot,
         surface,
-        Screen::new(copy::ASK_MINT, vec![vec![button("✕ Cancel", CANCEL)]]),
+        Screen::new(
+            copy::ASK_MINT,
+            vec![
+                vec![button("⭐ Popular", "at:pop")],
+                vec![button("✕ Cancel", CANCEL)],
+            ],
+        ),
     )
     .await
 }
@@ -73,11 +99,37 @@ pub async fn on_callback(
     rest: &[&str],
 ) -> Result<()> {
     match rest {
+        // Browsing the catalog is stateless: the screens are a pure function of the
+        // compiled-in list. The dialogue is held at the mint step so a user who
+        // changes their mind can still paste an address instead.
+        ["pop"] => present_groups(state, dialogue, surface).await,
+        ["g", code] => match Group::parse(code) {
+            Some(group) => present_group(state, dialogue, surface, group).await,
+            None => expired(state, q).await,
+        },
+        // A catalog pick carries only an index, so it is self-contained and can be
+        // acted on from either the mint step or a re-tapped older screen.
+        ["p", index] => match index.parse::<usize>().ok().and_then(catalog::entry) {
+            Some(entry) => choose(state, dialogue, surface, entry).await,
+            None => expired(state, q).await,
+        },
         ["sk"] => {
             let DialogueState::AddToken(Step::AwaitingSymbol { mint, .. }) = current else {
                 return expired(state, q).await;
             };
             present_confirm(state, dialogue, surface, mint, None).await
+        }
+        // "Use <SYMBOL>": accepts the catalog's name for a recognised mint.
+        ["us"] => {
+            let DialogueState::AddToken(Step::AwaitingSymbol {
+                mint,
+                suggested: Some(symbol),
+                ..
+            }) = current
+            else {
+                return expired(state, q).await;
+            };
+            present_confirm(state, dialogue, surface, mint, Some(symbol)).await
         }
         ["ok"] => {
             let DialogueState::AddToken(Step::Confirming { mint, symbol }) = current else {
@@ -98,6 +150,108 @@ async fn expired(state: &AppState, q: &CallbackQuery) -> Result<()> {
     .await;
     Ok(())
 }
+
+// ── The built-in catalog ──────────────────────────────────────────────────────────
+
+async fn present_groups(state: &AppState, dialogue: &FlowDialogue, surface: Surface) -> Result<()> {
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = Group::all()
+        .into_iter()
+        .map(|group| vec![button(group.label(), format!("at:g:{}", group.code()))])
+        .collect();
+    rows.push(vec![
+        button("← Paste a mint", "at:new"),
+        button("✕ Cancel", CANCEL),
+    ]);
+
+    super::advance(dialogue, Step::AwaitingMint).await?;
+    ui::render(&state.bot, surface, Screen::new(copy::PICK_GROUP, rows)).await
+}
+
+async fn present_group(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    surface: Surface,
+    group: Group,
+) -> Result<()> {
+    let entries = catalog::in_group(group);
+
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = entries
+        .chunks(CATALOG_COLUMNS)
+        .map(|chunk| {
+            chunk
+                .iter()
+                .map(|(index, entry)| button(entry.symbol, format!("at:p:{index}")))
+                .collect()
+        })
+        .collect();
+    rows.push(vec![button("← Back", "at:pop"), button("✕ Cancel", CANCEL)]);
+
+    super::advance(dialogue, Step::AwaitingMint).await?;
+    ui::render(
+        &state.bot,
+        surface,
+        Screen::new(copy::pick_token(group.label()), rows),
+    )
+    .await
+}
+
+/// Acts on a catalog pick. The address is trusted (it is compiled in) but nothing else
+/// is: the price is verified and the user still confirms, exactly as for a pasted mint.
+async fn choose(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    surface: Surface,
+    entry: &'static catalog::Entry,
+) -> Result<()> {
+    if TokenRepo::new(&state.db)
+        .find_by_mint(entry.mint)
+        .await?
+        .is_some()
+    {
+        super::reset(dialogue).await;
+        return ui::render(
+            &state.bot,
+            surface,
+            Screen::new(
+                copy::already_tracking(&ui::esc(entry.symbol)),
+                vec![vec![button("🪙 Tokens", "tk"), button("🏠 Menu", MAIN)]],
+            ),
+        )
+        .await;
+    }
+
+    let price = match state.price_provider.get_token_price_usd(entry.mint).await {
+        Ok(price) => Some(price),
+        Err(ProviderError::Unsupported(_)) => {
+            super::reset(dialogue).await;
+            return ui::render(
+                &state.bot,
+                surface,
+                Screen::new(
+                    copy::catalog_not_priced(&ui::esc(entry.symbol)),
+                    vec![vec![button("⭐ Popular", "at:pop")], menu_row()],
+                ),
+            )
+            .await;
+        }
+        Err(err) => {
+            tracing::warn!(mint = entry.mint, %err, "could not verify catalog token price");
+            None
+        }
+    };
+
+    present_symbol(
+        state,
+        dialogue,
+        surface,
+        entry.mint.to_string(),
+        price,
+        Some(entry.symbol.to_string()),
+    )
+    .await
+}
+
+// ── Pasting a mint ────────────────────────────────────────────────────────────────
 
 async fn await_mint(state: AppState, dialogue: FlowDialogue, msg: Message) -> HandlerResult {
     let outcome = await_mint_body(&state, &dialogue, &msg).await;
@@ -123,7 +277,7 @@ async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
             &state.bot,
             surface,
             Screen::new(
-                format!("Already tracking <b>{}</b>.", ui::esc(name)),
+                copy::already_tracking(&ui::esc(name)),
                 vec![vec![button("🪙 Tokens", "tk"), button("🏠 Menu", MAIN)]],
             ),
         )
@@ -149,7 +303,11 @@ async fn await_mint_body(state: &AppState, dialogue: &FlowDialogue, msg: &Messag
         }
     };
 
-    present_symbol(state, dialogue, surface, mint, price).await
+    // A pasted address the catalog recognises gets the reviewed symbol offered, so the
+    // same token cannot end up named two different ways depending on how it was added.
+    let suggested = catalog::symbol_for(&mint).map(str::to_string);
+
+    present_symbol(state, dialogue, surface, mint, price, suggested).await
 }
 
 async fn present_symbol(
@@ -158,6 +316,7 @@ async fn present_symbol(
     surface: Surface,
     mint: String,
     price: Option<f64>,
+    suggested: Option<String>,
 ) -> Result<()> {
     let intro = match price {
         Some(price) => format!(
@@ -167,22 +326,37 @@ async fn present_symbol(
         None => "Couldn't reach the price provider to verify it right now.".to_string(),
     };
 
-    let rows = vec![vec![button("Skip", "at:sk"), button("✕ Cancel", CANCEL)]];
+    let (text, rows) = match &suggested {
+        Some(symbol) => (
+            copy::ask_token_name_known(&intro, &ui::esc(symbol)),
+            vec![vec![
+                button(format!("✅ Use {symbol}"), "at:us"),
+                button("✕ Cancel", CANCEL),
+            ]],
+        ),
+        None => (
+            copy::ask_token_name(&intro),
+            vec![vec![button("Skip", "at:sk"), button("✕ Cancel", CANCEL)]],
+        ),
+    };
 
-    super::advance(dialogue, Step::AwaitingSymbol { mint, price }).await?;
-    ui::render(
-        &state.bot,
-        surface,
-        Screen::new(copy::ask_token_name(&intro), rows),
+    super::advance(
+        dialogue,
+        Step::AwaitingSymbol {
+            mint,
+            price,
+            suggested,
+        },
     )
-    .await
+    .await?;
+    ui::render(&state.bot, surface, Screen::new(text, rows)).await
 }
 
 async fn await_symbol(
     state: AppState,
     dialogue: FlowDialogue,
     msg: Message,
-    (mint, _price): (String, Option<f64>),
+    (mint, _price, _suggested): (String, Option<f64>, Option<String>),
 ) -> HandlerResult {
     let outcome = await_symbol_body(&state, &dialogue, &msg, mint).await;
     reply::finish(&state.bot, msg.chat.id, "add_token.symbol", outcome).await

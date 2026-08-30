@@ -258,7 +258,7 @@ async fn present_kind(state: &AppState, dialogue: &FlowDialogue, surface: Surfac
     if tokens == 0 && wallets == 0 {
         let rows = vec![
             vec![
-                button("🪙 Add Token", "at:new"),
+                button("⭐ Popular Tokens", "at:pop"),
                 button("👛 Add Wallet", "aw:new"),
             ],
             crate::telegram::ui::menu_row(),
@@ -347,7 +347,7 @@ async fn present_target(
     if rows.is_empty() {
         // The user picked a kind that has no tracked targets yet.
         let add = match kind {
-            TargetKind::Token => vec![button("🪙 Add Token", "at:new")],
+            TargetKind::Token => vec![button("⭐ Popular Tokens", "at:pop")],
             TargetKind::Wallet => vec![button("👛 Add Wallet", "aw:new")],
         };
         super::reset(dialogue).await;
