@@ -38,6 +38,8 @@ pub enum Command {
     Addtoken,
     #[command(description = "list tracked tokens")]
     Tokens,
+    #[command(description = "list starred tokens")]
+    Favourites,
     #[command(description = "stop tracking a token")]
     Deletetoken(String),
 
@@ -97,6 +99,7 @@ pub fn schema() -> UpdateHandler<HandlerError> {
         .branch(case![Command::Cancel].endpoint(flows::cancel))
         .branch(case![Command::Addtoken].endpoint(flows::add_token::start))
         .branch(case![Command::Tokens].endpoint(commands::targets::list_tokens))
+        .branch(case![Command::Favourites].endpoint(commands::targets::list_favourites))
         .branch(case![Command::Deletetoken(args)].endpoint(commands::targets::delete_token))
         .branch(case![Command::Addwallet].endpoint(flows::add_wallet::start))
         .branch(case![Command::Wallets].endpoint(commands::targets::list_wallets))

@@ -6,7 +6,7 @@
 //! (Skip / Add), while the address itself is pasted as text.
 //!
 //! Because a mint address is immutable and WatchTower is Solana-only, the well-known
-//! ones are compiled in ([`crate::catalog`]) and offered as a browsable ⭐ Popular
+//! ones are compiled in ([`crate::catalog`]) and offered as a browsable 🔥 Popular
 //! shortcut. A catalog pick is only a way to supply the address: it joins this same
 //! flow at the verification step and is confirmed by the user like any pasted mint.
 
@@ -82,7 +82,7 @@ pub async fn start_on(state: &AppState, dialogue: &FlowDialogue, surface: Surfac
         Screen::new(
             copy::ASK_MINT,
             vec![
-                vec![button("⭐ Popular", "at:pop")],
+                vec![button("🔥 Popular", "at:pop")],
                 vec![button("✕ Cancel", CANCEL)],
             ],
         ),
@@ -229,7 +229,7 @@ async fn choose(
                 surface,
                 Screen::new(
                     copy::catalog_not_priced(&ui::esc(entry.symbol)),
-                    vec![vec![button("⭐ Popular", "at:pop")], menu_row()],
+                    vec![vec![button("🔥 Popular", "at:pop")], menu_row()],
                 ),
             )
             .await;

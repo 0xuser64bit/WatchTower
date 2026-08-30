@@ -88,6 +88,9 @@ pub const HELP: &str = concat!(
     "🪙 a token's price, in USD\n",
     "👛 a wallet's balance, in SOL\n",
     "\n",
+    "Star a token with ⭐ Favourite and it leads the token list and gets\n",
+    "its own menu shortcut, so the ones you watch daily stay one tap away.\n",
+    "\n",
     "<b>Conditions</b>\n",
     "Above · Below · At or above · At or below · Up % · Down %\n",
     "\n",
@@ -180,11 +183,21 @@ pub const EMPTY_TOKENS: &str = concat!(
     "\n",
     "No tokens yet.\n",
     "\n",
-    "Pick a well-known one from ⭐ Popular, or add any token by its mint\n",
+    "Pick a well-known one from 🔥 Popular, or add any token by its mint\n",
     "address, to watch its price in USD."
 );
 
 pub const TOKEN_GONE: &str = "That token is no longer tracked.";
+
+pub const EMPTY_FAVOURITES: &str = concat!(
+    "<b>⭐ Favourites</b>\n",
+    "\n",
+    "Nothing starred yet.\n",
+    "\n",
+    "Open a token and tap ⭐ Favourite. Starred tokens lead the token\n",
+    "list and get their own shortcut here, so the ones you watch daily\n",
+    "stay one tap away."
+);
 
 pub const EMPTY_WALLETS: &str = concat!(
     "<b>👛 Tracked Wallets</b>\n",
@@ -224,7 +237,7 @@ pub const NOT_A_PRIVATE_CHAT: &str = concat!(
 pub const ASK_MINT: &str = concat!(
     "<b>Add a token</b>\n",
     "\n",
-    "Tap ⭐ Popular to pick a well-known token, or paste a mint address —\n",
+    "Tap 🔥 Popular to pick a well-known token, or paste a mint address —\n",
     "32-44 letters and numbers, shown on any Solana explorer.\n",
     "\n",
     "USDC, for example:\n",
@@ -234,7 +247,7 @@ pub const ASK_MINT: &str = concat!(
 // ── The built-in token catalog ──────────────────────────────────────────────────────
 
 pub const PICK_GROUP: &str = concat!(
-    "<b>⭐ Popular tokens</b>\n",
+    "<b>🔥 Popular tokens</b>\n",
     "\n",
     "Pick a category, then the token. Mint addresses are built into\n",
     "WatchTower, so there is nothing to look up or paste.\n",
@@ -498,6 +511,7 @@ mod tests {
             ("empty_alerts", EMPTY_ALERTS.into()),
             ("alert_gone", ALERT_GONE.into()),
             ("empty_tokens", EMPTY_TOKENS.into()),
+            ("empty_favourites", EMPTY_FAVOURITES.into()),
             ("token_gone", TOKEN_GONE.into()),
             ("empty_wallets", EMPTY_WALLETS.into()),
             ("wallet_gone", WALLET_GONE.into()),

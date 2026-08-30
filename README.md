@@ -20,13 +20,20 @@ than transaction or mempool monitoring. An unlisted token cannot be tracked, but
 temporary price-provider outage does not block saving a valid mint.
 
 Because a mint address never changes and WatchTower is Solana-only, the well-known
-mints are compiled in: **⭐ Popular** offers SOL and the stablecoins, liquid staking
+mints are compiled in: **🔥 Popular** offers SOL and the stablecoins, liquid staking
 tokens, DeFi and infra tokens, memecoins, and bridged assets, grouped and tappable, so
 the common case needs no address lookup. The list is data in
 [src/catalog.rs](src/catalog.rs), never a runtime lookup, so no third party can point a
 familiar symbol at a different mint; changing an address takes a reviewed commit. A
 pick is only a shortcut for supplying the address — it is price-verified and confirmed
 like any pasted mint — and anything not listed is still added by pasting its mint.
+
+Once a token is tracked, **⭐ Favourite** on its detail screen stars it. Starred tokens
+lead every token listing (including the alert flow's target step), get a **⭐ Favourites**
+shortcut on the main menu, and offer Create Alert with the token already chosen — so a
+token you watch daily is two taps from a new alert instead of a scroll through
+everything you have ever tracked. Favourites are shared across admins, like rules and
+targets, and the shortcut only appears once something is starred.
 
 Alerts are edge-triggered: a rule fires when its condition becomes true and stays
 quiet until the condition clears. Percentage rules use a rolling baseline that is set
@@ -64,6 +71,7 @@ WatchTower is a small menu-driven app inside a private Telegram chat. Send `/sta
 ```text
 🚨 Alerts     🪙 Tokens
 👛 Wallets    📜 History
+⭐ Favourites (2)          (once something is starred)
 ⚙️ Status     ❔ Help
 🛡 Admin      (admins only)
 ```
@@ -86,11 +94,15 @@ Then wait: 300s before repeating
 [ ✎ Edit ] [ ✕ Cancel ]
 ```
 
+Starting from a favourite skips the first two steps: the token is already chosen, so
+the condition is the first thing asked.
+
 Managing things is tap-driven too: the Alerts screen lists each rule with its state
 (🟢 armed · 🔴 firing · ⚪ disabled); tapping one opens a detail screen with
-enable/disable and delete. Destructive actions (deleting a rule, token or wallet;
-removing an admin; blocking a user) always ask for confirmation first. IDs are used
-internally but are never something you have to type.
+enable/disable and delete. A token's detail screen also carries ⭐ Favourite and
+Create Alert. Destructive actions (deleting a rule, token or wallet; removing an admin;
+blocking a user) always ask for confirmation first. IDs are used internally but are
+never something you have to type.
 
 ### Command shortcuts
 
@@ -106,6 +118,7 @@ listing, but tapping is the primary path.
 | `/cancel` | Leave an active guided flow |
 | `/addtoken` | Pick a popular token, or verify and track any mint |
 | `/tokens` | Tracked tokens screen |
+| `/favourites` | Starred tokens screen |
 | `/deletetoken <id>` | Remove a token and its rules |
 | `/addwallet` | Verify and track a wallet address |
 | `/wallets` | Tracked wallets screen |
@@ -258,7 +271,7 @@ providers (CoinGecko, Solana RPC) <- engine (poll, evaluate, dispatch) -> Telegr
 - `telegram`: private-chat routing for both messages and callback queries,
   authorization, the screen renderers and inline keyboards (`screens`, `ui`,
   `callback`), guided `flows`, user-facing `copy`, and all mutations.
-- `catalog`: the compiled-in directory of well-known Solana mints behind ⭐ Popular.
+- `catalog`: the compiled-in directory of well-known Solana mints behind 🔥 Popular.
   Reviewed data, not a runtime lookup, and a shortcut for supplying an address rather
   than a way around verification.
 - `engine`: interval scheduling, provider reads, rule evaluation, persistence, and
@@ -315,13 +328,15 @@ this short smoke test against a private chat:
 
 1. Send `/start`, confirm the main menu appears, and tap through 🚨 Alerts and
    ⚙️ Status.
-2. Tap 🪙 Tokens → ⭐ Popular, pick a token, and confirm its current price is shown
+2. Tap 🪙 Tokens → 🔥 Popular, pick a token, and confirm its current price is shown
    before you tap to save it. Then repeat with Add Token and a pasted mint.
-3. Create an alert entirely by tapping (🚨 Alerts → Create Alert) whose condition is
+3. Open that token, tap ⭐ Favourite, and confirm ⭐ Favourites appears on the main
+   menu and the token leads the token list.
+4. Create an alert entirely by tapping (🚨 Alerts → Create Alert) whose condition is
    currently true, and confirm exactly one Telegram alert arrives after a poll; the
    alert shows as 🔴 firing.
-4. Restart the daemon and confirm the rule remains firing without sending a duplicate.
-5. Confirm commands and taps are refused in a group chat, and that a blocked user loses
+5. Restart the daemon and confirm the rule remains firing without sending a duplicate.
+6. Confirm commands and taps are refused in a group chat, and that a blocked user loses
    access on their next message or tap, including during a guided flow.
 
 ## License

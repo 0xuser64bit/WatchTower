@@ -47,6 +47,56 @@ async fn assert_reply_contains(text: &str, expected: &str) {
     mock.assert_async().await;
 }
 
+/// Asserts that dispatching `text` produces no reply mentioning `unexpected`.
+async fn assert_reply_omits(text: &str, unexpected: &str) {
+    let mut server = mockito::Server::new_async().await;
+
+    let absent = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::Regex(regex::escape(unexpected)))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(0)
+        .create_async()
+        .await;
+
+    // Everything else still has to succeed, or the handler would fail for the wrong
+    // reason and the assertion would pass vacuously.
+    let _catch_all = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db,
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    support::dispatch(
+        &state,
+        InMemStorage::<DialogueState>::new(),
+        support::message(text),
+    )
+    .await
+    .unwrap_or_else(|err| panic!("dispatching {text:?} failed: {err}"));
+
+    absent.assert_async().await;
+}
+
 #[tokio::test]
 async fn start_opens_the_main_menu() {
     assert_reply_contains("/start", "WatchTower").await;
@@ -91,6 +141,7 @@ async fn empty_listings_reach_their_handlers() {
     assert_reply_contains("/wallets", "No wallets yet").await;
     assert_reply_contains("/alerts", "No alerts yet").await;
     assert_reply_contains("/history", "Nothing has fired yet").await;
+    assert_reply_contains("/favourites", "Nothing starred yet").await;
 }
 
 #[tokio::test]
@@ -138,6 +189,66 @@ async fn a_pasted_address_is_answered_with_what_to_do_with_it() {
     // Pasting an address is the most likely thing someone tries without a command;
     // pointing them at the two ways to track one beats pointing at the manual.
     assert_reply_contains("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", "Add Token").await;
+}
+
+#[tokio::test]
+async fn the_main_menu_hides_favourites_until_something_is_starred() {
+    // Starring is opt-in, so an unused feature must not occupy a row on the screen
+    // every session starts from.
+    assert_reply_omits("/menu", "Favourites").await;
+}
+
+#[tokio::test]
+async fn the_main_menu_offers_favourites_once_a_token_is_starred() {
+    use watchtower::db::repos::tokens::TokenRepo;
+
+    let mut server = mockito::Server::new_async().await;
+
+    let shortcut = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[sS]endMessage$".to_string()),
+        )
+        .match_body(Matcher::Regex(regex::escape("Favourites (1)")))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db.clone(),
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+
+    let repo = TokenRepo::new(&db);
+    let token = repo
+        .create("So11111111111111111111111111111111111111112", Some("SOL"))
+        .await
+        .unwrap();
+    repo.set_favourite(token.id, true).await.unwrap();
+
+    support::dispatch(
+        &state,
+        InMemStorage::<DialogueState>::new(),
+        support::message("/menu"),
+    )
+    .await
+    .expect("dispatch");
+
+    shortcut.assert_async().await;
+}
+
+#[tokio::test]
+async fn help_explains_what_starring_a_token_does() {
+    // A ⭐ button on a detail screen is not self-explanatory; the two things it changes
+    // have to be stated somewhere.
+    assert_reply_contains("/help", "Favourite").await;
+    assert_reply_contains("/help", "one tap away").await;
 }
 
 #[tokio::test]

@@ -242,7 +242,7 @@ async fn a_token_can_be_added_by_tapping_through_the_flow() {
 async fn a_popular_token_can_be_added_without_typing_anything() {
     let session = Session::new().await;
 
-    // Add Token → ⭐ Popular → SOL & stablecoins → USDC → Use USDC → confirm.
+    // Add Token → 🔥 Popular → SOL & stablecoins → USDC → Use USDC → confirm.
     session.tap("at:new").await;
     session.tap("at:pop").await;
     session.tap("at:g:c").await;
@@ -406,6 +406,264 @@ fn catalog_index(symbol: &str) -> usize {
         .iter()
         .position(|entry| entry.symbol == symbol)
         .unwrap_or_else(|| panic!("{symbol} is not in the catalog"))
+}
+
+// ── Favourites ────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_token_can_be_starred_and_unstarred_by_tapping() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+
+    session.tap(&format!("tk:v:{}", token.id)).await;
+    session.tap(&format!("tk:f:{}:1", token.id)).await;
+    assert!(
+        TokenRepo::new(&session.state.db)
+            .find(token.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_favourite(),
+        "the star should have been recorded"
+    );
+
+    session.tap(&format!("tk:f:{}:0", token.id)).await;
+    assert!(!TokenRepo::new(&session.state.db)
+        .find(token.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_favourite());
+}
+
+#[tokio::test]
+async fn the_favourite_button_carries_the_end_state_so_a_double_tap_converges() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+
+    // Two taps on the same (possibly stale) button must not undo each other, which is
+    // exactly what a "flip it" callback would do.
+    session.tap(&format!("tk:f:{}:1", token.id)).await;
+    session.tap(&format!("tk:f:{}:1", token.id)).await;
+
+    assert!(TokenRepo::new(&session.state.db)
+        .find(token.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_favourite());
+    assert_eq!(
+        TokenRepo::new(&session.state.db)
+            .count_favourites()
+            .await
+            .unwrap(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_favourites_screen_is_reachable_and_lists_only_starred_tokens() {
+    use mockito::Matcher;
+
+    let mut server = mockito::Server::new_async().await;
+
+    // Asserted on the rendered screen rather than only on the database, because the
+    // route is what is under test: an unrecognised callback silently falls through to
+    // "That button has expired" and the main menu, which a database check would miss.
+    let screen = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[eE]ditMessageText$".into()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("Favourites")),
+            Matcher::Regex(regex::escape("USDC")),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect_at_least(1)
+        .create_async()
+        .await;
+
+    // The unstarred token must not appear on this screen at all.
+    let absent = server
+        .mock(
+            "POST",
+            Matcher::Regex(r"^/bot.+/[eE]ditMessageText$".into()),
+        )
+        .match_body(Matcher::AllOf(vec![
+            Matcher::Regex(regex::escape("Favourites")),
+            Matcher::Regex(regex::escape("BONK")),
+        ]))
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(support::SEND_MESSAGE_OK)
+        .expect(0)
+        .create_async()
+        .await;
+
+    for method in [
+        "[sS]endMessage",
+        "[eE]ditMessageText",
+        "[aA]nswerCallbackQuery",
+    ] {
+        server
+            .mock("POST", Matcher::Regex(format!(r"^/bot.+/{method}$")))
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(support::SEND_MESSAGE_OK)
+            .expect_at_least(0)
+            .create_async()
+            .await;
+    }
+
+    let db = support::database().await;
+    let state = support::app_state(
+        db.clone(),
+        &server.url(),
+        Arc::new(support::FakePriceProvider::new()),
+        Arc::new(support::FakeChainProvider::new()),
+    );
+    let storage = InMemStorage::<DialogueState>::new();
+
+    let repo = TokenRepo::new(&db);
+    let starred = repo.create(MINT, Some("USDC")).await.unwrap();
+    repo.create("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", Some("BONK"))
+        .await
+        .unwrap();
+    repo.set_favourite(starred.id, true).await.unwrap();
+
+    for data in ["fv", "fv:p:0"] {
+        support::dispatch(&state, storage.clone(), support::callback(data))
+            .await
+            .expect("dispatch");
+    }
+
+    screen.assert_async().await;
+    absent.assert_async().await;
+}
+
+#[tokio::test]
+async fn a_favourite_starts_an_alert_with_the_token_already_chosen() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+    TokenRepo::new(&session.state.db)
+        .set_favourite(token.id, true)
+        .await
+        .unwrap();
+
+    // Create Alert on the token detail skips the kind and target steps entirely: the
+    // condition is the first thing asked.
+    session.tap(&format!("ac:tk:{}", token.id)).await;
+    session.tap("ac:op:lt").await;
+    session.send("0.99").await;
+    session.tap("ac:cd").await;
+    session.tap("ac:ok").await;
+
+    let rules = RuleRepo::new(&session.state.db).list_all().await.unwrap();
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].target.id, token.id);
+    assert_eq!(rules[0].operator, Operator::Lt);
+    assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+#[tokio::test]
+async fn a_shortcut_onto_a_token_that_is_gone_creates_nothing() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+    TokenRepo::new(&session.state.db)
+        .delete(token.id)
+        .await
+        .unwrap();
+
+    // A stale keyboard must not seed a rule pointing at a token that has been removed;
+    // the foreign key would refuse it, but the flow must not get that far.
+    session.tap(&format!("ac:tk:{}", token.id)).await;
+    session.tap("ac:op:lt").await;
+
+    assert!(RuleRepo::new(&session.state.db)
+        .list_all()
+        .await
+        .unwrap()
+        .is_empty());
+    assert_eq!(session.dialogue_state().await, DialogueState::Idle);
+}
+
+#[tokio::test]
+async fn a_malformed_favourite_button_changes_nothing() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+
+    // Only the two flags this crate emits may be honoured, and an id must be a real
+    // positive row: a hand-crafted button cannot coerce anything else into a write.
+    for data in [
+        format!("tk:f:{}:yes", token.id),
+        format!("tk:f:{}:2", token.id),
+        format!("tk:f:{}:", token.id),
+        "tk:f:0:1".to_string(),
+        "tk:f:-1:1".to_string(),
+        "tk:f:99999:1".to_string(),
+        "tk:f:abc:1".to_string(),
+    ] {
+        session.tap(&data).await;
+    }
+
+    assert!(!TokenRepo::new(&session.state.db)
+        .find(token.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .is_favourite());
+    assert_eq!(
+        TokenRepo::new(&session.state.db)
+            .count_favourites()
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn a_blocked_user_cannot_star_a_token() {
+    let session = Session::new().await;
+    let token = TokenRepo::new(&session.state.db)
+        .create(MINT, Some("USDC"))
+        .await
+        .unwrap();
+
+    UserRepo::new(&session.state.db)
+        .set_blocked(support::ADMIN_ID, true)
+        .await
+        .unwrap();
+
+    session.tap(&format!("tk:f:{}:1", token.id)).await;
+    session.tap("fv").await;
+
+    assert!(
+        !TokenRepo::new(&session.state.db)
+            .find(token.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_favourite(),
+        "favourites must not be a way around authorization"
+    );
 }
 
 #[tokio::test]

@@ -31,6 +31,7 @@ fn everyday_commands() -> Vec<BotCommand> {
         BotCommand::new("alerts", "Your alerts"),
         BotCommand::new("addalert", "Create an alert"),
         BotCommand::new("tokens", "Tracked tokens"),
+        BotCommand::new("favourites", "Starred tokens"),
         BotCommand::new("addtoken", "Track a token"),
         BotCommand::new("wallets", "Tracked wallets"),
         BotCommand::new("addwallet", "Track a wallet"),

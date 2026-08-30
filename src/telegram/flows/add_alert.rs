@@ -114,6 +114,22 @@ pub async fn start_on(state: &AppState, dialogue: &FlowDialogue, surface: Surfac
     present_kind(state, dialogue, surface).await
 }
 
+/// Enters the flow with a token already chosen, from a tap on a favourite.
+///
+/// Skips the kind and target steps — a starred token answers both — and lands on the
+/// condition. The target is still resolved against the database by
+/// [`present_operator`], so a stale button cannot seed a rule pointing at a token that
+/// has since been removed.
+pub async fn start_on_token(
+    state: &AppState,
+    dialogue: &FlowDialogue,
+    surface: Surface,
+    token_id: i64,
+) -> Result<()> {
+    super::reset(dialogue).await;
+    present_operator(state, dialogue, surface, TargetKind::Token, token_id).await
+}
+
 /// Routes an `ac:*` in-flow tap. Reads accumulated choices from `current`; a tap whose
 /// step no longer matches (a stale keyboard, a double tap) is answered with a notice
 /// rather than acted on.
@@ -259,7 +275,7 @@ async fn present_kind(state: &AppState, dialogue: &FlowDialogue, surface: Surfac
     if tokens == 0 && wallets == 0 {
         let rows = vec![
             vec![
-                button("⭐ Popular Tokens", "at:pop"),
+                button("🔥 Popular Tokens", "at:pop"),
                 button("👛 Add Wallet", "aw:new"),
             ],
             crate::telegram::ui::menu_row(),
@@ -312,6 +328,8 @@ async fn present_target(
 
     match kind {
         TargetKind::Token => {
+            // `list` returns favourites first, so the tokens someone watches daily are
+            // at the top of the step instead of wherever they happen to have been added.
             for token in TokenRepo::new(&state.db).list().await? {
                 let name = token
                     .symbol
@@ -319,7 +337,12 @@ async fn present_target(
                     .unwrap_or_else(|| "unnamed".to_string());
                 rows.push(vec![button(
                     format!(
-                        "🪙 {} · {}",
+                        "{}{} · {}",
+                        if token.is_favourite() {
+                            "⭐ "
+                        } else {
+                            "🪙 "
+                        },
                         name,
                         crate::rules::types::abbreviate(&token.mint_address)
                     ),
@@ -348,7 +371,7 @@ async fn present_target(
     if rows.is_empty() {
         // The user picked a kind that has no tracked targets yet.
         let add = match kind {
-            TargetKind::Token => vec![button("⭐ Popular Tokens", "at:pop")],
+            TargetKind::Token => vec![button("🔥 Popular Tokens", "at:pop")],
             TargetKind::Wallet => vec![button("👛 Add Wallet", "aw:new")],
         };
         super::reset(dialogue).await;

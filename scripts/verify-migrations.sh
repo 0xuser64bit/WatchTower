@@ -85,6 +85,33 @@ assert_healthy_schema() {
     expect "foreign key check" "" "$(sqlite3 "${db}" "PRAGMA foreign_key_check;")"
     expect "expected tables exist" "alert_events|rules|tokens|users|wallets" \
         "$(sqlite3 "${db}" "SELECT group_concat(name, '|') FROM (SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_sqlx%' ORDER BY name);")"
+    # 0004 adds favourites. A tracked token must start unstarred, whether it was
+    # inserted before or after that migration ran.
+    expect "tokens can be starred" "1" \
+        "$(sqlite3 "${db}" "SELECT COUNT(*) FROM pragma_table_info('tokens') WHERE name = 'favourited_at';")"
+    expect "existing tokens start unstarred" "0" \
+        "$(sqlite3 "${db}" "SELECT COUNT(*) FROM tokens WHERE favourited_at IS NOT NULL;")"
+    expect "the favourites index exists" "1" \
+        "$(sqlite3 "${db}" "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_tokens_favourited';")"
+}
+
+# Favourites survive the operations that touch their token.
+assert_favourites() {
+    local db="$1" token_id
+    token_id="$(sqlite3 "${db}" "SELECT id FROM tokens LIMIT 1;")"
+
+    sqlite3 "${db}" "UPDATE tokens SET favourited_at = '2026-01-01T00:00:00.000Z' WHERE id = ${token_id};"
+    expect "a token can be starred" "1" \
+        "$(sqlite3 "${db}" "SELECT COUNT(*) FROM tokens WHERE favourited_at IS NOT NULL;")"
+
+    # A star belongs to the tracked token, not to the mint: deleting the token must not
+    # leave a favourite behind, and re-adding the mint must not inherit the old star.
+    local mint
+    mint="$(sqlite3 "${db}" "SELECT mint_address FROM tokens WHERE id = ${token_id};")"
+    sqlite3 "${db}" "PRAGMA foreign_keys = ON; DELETE FROM tokens WHERE id = ${token_id};"
+    sqlite3 "${db}" "PRAGMA foreign_keys = ON; INSERT INTO tokens (mint_address) VALUES ('${mint}');"
+    expect "a re-added mint starts unstarred" "0" \
+        "$(sqlite3 "${db}" "SELECT COUNT(*) FROM tokens WHERE favourited_at IS NOT NULL;")"
 }
 
 assert_constraints() {
@@ -121,16 +148,18 @@ apply_all "${fresh}"
 assert_healthy_schema "${fresh}"
 sqlite3 "${fresh}" "PRAGMA foreign_keys = ON; INSERT INTO tokens (mint_address, symbol) VALUES ('MINT_NEW', 'NEW');"
 assert_constraints "${fresh}"
+assert_favourites "${fresh}"
 
 echo
 echo "=== path 2: existing deployment upgrading with live data ==="
 # Reaches the current release with 0001+0002 already recorded, then gains data, then
-# takes 0003 — the sequence a real upgrade follows.
+# takes 0003 and 0004 — the sequence a real upgrade follows.
 upgraded="${workdir}/upgraded.db"
 apply "${upgraded}" migrations/0001_init.sql
 apply "${upgraded}" migrations/0002_mvp_hardening.sql
 seed_legacy_data "${upgraded}"
 apply "${upgraded}" migrations/0003_target_relations.sql || fail "0003 failed on populated data"
+apply "${upgraded}" migrations/0004_token_favourites.sql || fail "0004 failed on populated data"
 
 assert_healthy_schema "${upgraded}"
 
@@ -155,15 +184,22 @@ expect "history preserved as a re-renderable snapshot" "token|MINT_LIVE|LIVE|gt|
 echo
 echo "=== cascade and re-add behaviour ==="
 token_id="$(sqlite3 "${upgraded}" "SELECT id FROM tokens WHERE mint_address = 'MINT_LIVE';")"
+# Starred, to prove the cascade takes the favourite with it rather than leaving one
+# pointing at a token that no longer exists.
+sqlite3 "${upgraded}" "UPDATE tokens SET favourited_at = '2026-01-01T00:00:00.000Z' WHERE id = ${token_id};"
 sqlite3 "${upgraded}" "PRAGMA foreign_keys = ON; DELETE FROM tokens WHERE id = ${token_id};"
 expect "deleting a target removes its rules" "0" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM rules WHERE token_id = ${token_id};")"
+expect "deleting a target removes its favourite" "0" \
+    "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM tokens WHERE favourited_at IS NOT NULL;")"
 expect "history is detached, not deleted" "1|1" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*), SUM(rule_id IS NULL) FROM alert_events;")"
 # A removed mint must be available to track again.
 sqlite3 "${upgraded}" "PRAGMA foreign_keys = ON; INSERT INTO tokens (mint_address, symbol) VALUES ('MINT_LIVE', 'LIVE');"
 expect "a deleted mint can be tracked again" "1" \
     "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM tokens WHERE mint_address = 'MINT_LIVE';")"
+expect "and comes back unstarred" "0" \
+    "$(sqlite3 "${upgraded}" "SELECT COUNT(*) FROM tokens WHERE mint_address = 'MINT_LIVE' AND favourited_at IS NOT NULL;")"
 
 echo
 # Idempotence is a property of sqlx's version tracking, not of the raw SQL (re-running

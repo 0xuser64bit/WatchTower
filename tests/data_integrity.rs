@@ -219,6 +219,155 @@ async fn deleting_a_missing_row_is_not_found_rather_than_silent_success() {
 }
 
 #[tokio::test]
+async fn starring_a_token_is_idempotent_and_keeps_its_original_position() {
+    let db = db().await;
+    let repo = TokenRepo::new(&db);
+    let token = repo.create(MINT, Some("SOL")).await.unwrap();
+
+    assert!(!token.is_favourite(), "tokens start unstarred");
+
+    let starred = repo.set_favourite(token.id, true).await.unwrap();
+    let at = starred.favourited_at.expect("a star records when");
+
+    // A double tap on a stale keyboard must not silently reorder the favourites list.
+    let again = repo.set_favourite(token.id, true).await.unwrap();
+    assert_eq!(again.favourited_at, Some(at));
+
+    let cleared = repo.set_favourite(token.id, false).await.unwrap();
+    assert_eq!(cleared.favourited_at, None);
+    // Unstarring is idempotent too.
+    assert!(repo
+        .set_favourite(token.id, false)
+        .await
+        .unwrap()
+        .favourited_at
+        .is_none());
+}
+
+#[tokio::test]
+async fn starring_a_missing_token_is_not_found_rather_than_silent_success() {
+    let db = db().await;
+
+    // A tap on a token another chat deleted must be reported, not treated as done.
+    assert!(matches!(
+        TokenRepo::new(&db)
+            .set_favourite(404, true)
+            .await
+            .unwrap_err(),
+        AppError::NotFound(_)
+    ));
+}
+
+#[tokio::test]
+async fn favourites_lead_every_token_listing_in_the_order_they_were_starred() {
+    let db = db().await;
+    let repo = TokenRepo::new(&db);
+
+    let first = repo.create(MINT, Some("USDC")).await.unwrap();
+    let second = repo.create(WALLET, Some("SOL")).await.unwrap();
+    let third = repo
+        .create("DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", Some("BONK"))
+        .await
+        .unwrap();
+
+    // Star the newest two, so insertion order and star order disagree. The timestamps
+    // are set explicitly because `strftime` has millisecond resolution and two stars in
+    // one test tie; a real session cannot, since each star is a separate human tap.
+    for (id, at) in [
+        (third.id, "2026-01-01T00:00:00.000Z"),
+        (second.id, "2026-01-02T00:00:00.000Z"),
+    ] {
+        repo.set_favourite(id, true).await.unwrap();
+        sqlx::query("UPDATE tokens SET favourited_at = ? WHERE id = ?")
+            .bind(at)
+            .bind(id)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+
+    let listed: Vec<i64> = repo
+        .list()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(
+        listed,
+        vec![third.id, second.id, first.id],
+        "starred tokens must lead the full list, oldest star first"
+    );
+
+    let favourites: Vec<i64> = repo
+        .list_favourites()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(favourites, vec![third.id, second.id]);
+    assert_eq!(repo.count_favourites().await.unwrap(), 2);
+    // The favourites projection carries the same rule counts the full list does.
+    assert!(repo
+        .list_favourites()
+        .await
+        .unwrap()
+        .iter()
+        .all(|t| t.is_favourite() && t.rule_count == 0));
+}
+
+#[tokio::test]
+async fn tokens_starred_in_the_same_instant_still_have_one_stable_order() {
+    let db = db().await;
+    let repo = TokenRepo::new(&db);
+
+    // Timestamps have millisecond resolution, so two stars can genuinely tie. An
+    // unordered tie would let rows swap places between two renders of the same screen,
+    // and a paged list whose order shifts under the reader can hide or repeat an entry.
+    let first = repo.create(MINT, None).await.unwrap();
+    let second = repo.create(WALLET, None).await.unwrap();
+    repo.set_favourite(second.id, true).await.unwrap();
+    repo.set_favourite(first.id, true).await.unwrap();
+
+    sqlx::query("UPDATE tokens SET favourited_at = '2026-01-01T00:00:00.000Z'")
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    // The tie-break is the id, so the order is total rather than merely usually stable.
+    let expected = vec![first.id, second.id];
+    for _ in 0..5 {
+        let listed: Vec<i64> = repo
+            .list_favourites()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(listed, expected, "tied stars must order deterministically");
+    }
+}
+
+#[tokio::test]
+async fn removing_a_favourite_does_not_leave_it_behind() {
+    let db = db().await;
+    let repo = TokenRepo::new(&db);
+
+    let token = repo.create(MINT, Some("SOL")).await.unwrap();
+    repo.set_favourite(token.id, true).await.unwrap();
+    repo.delete(token.id).await.unwrap();
+
+    assert_eq!(repo.count_favourites().await.unwrap(), 0);
+    assert!(repo.list_favourites().await.unwrap().is_empty());
+
+    // Re-adding the same mint starts unstarred: the star belonged to the tracked token,
+    // not to the address.
+    let readded = repo.create(MINT, Some("SOL")).await.unwrap();
+    assert!(!readded.is_favourite());
+}
+
+#[tokio::test]
 async fn user_upsert_is_idempotent_and_promotes_in_place() {
     let db = db().await;
     let repo = UserRepo::new(&db);

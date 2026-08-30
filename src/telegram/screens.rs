@@ -14,11 +14,12 @@ use crate::alerts::format;
 use crate::app_state::AppState;
 use crate::db::repos::alert_events::{AlertEvent, AlertEventRepo};
 use crate::db::repos::rules::RuleRepo;
-use crate::db::repos::tokens::TokenRepo;
+use crate::db::repos::tokens::{TokenRepo, TokenWithRules};
 use crate::db::repos::users::{Role, User, UserRepo};
 use crate::db::repos::wallets::WalletRepo;
 use crate::error::Result;
 use crate::rules::types::{abbreviate, Operator, Rule, RuleState, TargetKind};
+use crate::telegram::callback::FAVOURITES;
 use crate::telegram::ui::{self, back_menu, button, code, esc, menu_row, Screen, Surface};
 use crate::telegram::{copy, menu};
 use teloxide::types::InlineKeyboardButton;
@@ -101,15 +102,26 @@ fn notice(text: impl Into<String>, back: &str) -> Screen {
 // ── Main menu & help ────────────────────────────────────────────────────────────────
 
 pub async fn show_main(state: &AppState, surface: Surface, is_admin: bool) -> Result<()> {
-    let tokens = TokenRepo::new(&state.db).count().await?;
+    let repo = TokenRepo::new(&state.db);
+    let tokens = repo.count().await?;
+    let favourites = repo.count_favourites().await?;
     let wallets = WalletRepo::new(&state.db).count().await?;
     let rules = RuleRepo::new(&state.db).count_all().await?;
 
     let mut rows = vec![
         vec![button("🚨 Alerts", "al"), button("🪙 Tokens", "tk")],
         vec![button("👛 Wallets", "wl"), button("📜 History", "hi")],
-        vec![button("⚙️ Status", "st"), button("❔ Help", "hl")],
     ];
+    // Only present once something is starred. Starring is opt-in, so an unused feature
+    // must not cost a permanent row on the busiest screen — and once it is used, being
+    // one tap from home is the entire point.
+    if favourites > 0 {
+        rows.push(vec![button(
+            format!("⭐ Favourites ({favourites})"),
+            FAVOURITES,
+        )]);
+    }
+    rows.push(vec![button("⚙️ Status", "st"), button("❔ Help", "hl")]);
     if is_admin {
         rows.push(vec![button("🛡 Admin", "ad")]);
     }
@@ -126,7 +138,7 @@ pub async fn show_help(state: &AppState, surface: Surface) -> Result<()> {
     let rows = vec![
         vec![button("🚨 Create Alert", "ac:new")],
         vec![
-            button("⭐ Popular Tokens", "at:pop"),
+            button("🔥 Popular Tokens", "at:pop"),
             button("👛 Add Wallet", "aw:new"),
         ],
         menu_row(),
@@ -282,12 +294,35 @@ pub async fn delete_alert(state: &AppState, surface: Surface, id: i64) -> Result
 
 // ── Tokens ────────────────────────────────────────────────────────────────────────
 
+/// The list row for a tracked token. A star replaces the coin so the marker is visible
+/// in the full list too, not only on the favourites screen.
+fn token_row(token: &TokenWithRules) -> Vec<InlineKeyboardButton> {
+    let name = token
+        .symbol
+        .clone()
+        .unwrap_or_else(|| "unnamed".to_string());
+
+    vec![button(
+        format!(
+            "{}{} · {}",
+            if token.is_favourite() {
+                "⭐ "
+            } else {
+                "🪙 "
+            },
+            name,
+            abbreviate(&token.mint_address)
+        ),
+        format!("tk:v:{}", token.id),
+    )]
+}
+
 pub async fn show_tokens(state: &AppState, surface: Surface, page: usize) -> Result<()> {
     let tokens = TokenRepo::new(&state.db).list().await?;
 
     if tokens.is_empty() {
         let rows = vec![
-            vec![button("⭐ Popular", "at:pop")],
+            vec![button("🔥 Popular", "at:pop")],
             vec![button("➕ Add Token", "at:new")],
             menu_row(),
         ];
@@ -295,31 +330,70 @@ pub async fn show_tokens(state: &AppState, surface: Surface, page: usize) -> Res
     }
 
     let (page, visible) = paginate(&tokens, page);
-    let mut rows: Vec<Vec<InlineKeyboardButton>> = visible
-        .iter()
-        .map(|token| {
-            let name = token
-                .symbol
-                .clone()
-                .unwrap_or_else(|| "unnamed".to_string());
-            vec![button(
-                format!("🪙 {} · {}", name, abbreviate(&token.mint_address)),
-                format!("tk:v:{}", token.id),
-            )]
-        })
-        .collect();
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = visible.iter().map(token_row).collect();
 
     if let Some(row) = pager("tk", page, tokens.len()) {
         rows.push(row);
     }
-    rows.push(vec![
-        button("⭐ Popular", "at:pop"),
-        button("➕ Add Token", "at:new"),
-    ]);
+
+    // ⭐ Favourites sits beside 🔥 Popular: both shorten this list, one curated by the
+    // user and one by WatchTower.
+    let favourites = tokens.iter().filter(|token| token.is_favourite()).count();
+    if favourites > 0 {
+        rows.push(vec![
+            button(format!("⭐ Favourites ({favourites})"), FAVOURITES),
+            button("🔥 Popular", "at:pop"),
+        ]);
+        rows.push(vec![button("➕ Add Token", "at:new")]);
+    } else {
+        rows.push(vec![
+            button("🔥 Popular", "at:pop"),
+            button("➕ Add Token", "at:new"),
+        ]);
+    }
     rows.push(menu_row());
 
     let text = format!(
-        "<b>🪙 Tracked Tokens</b>  ({})\n\nTap one to see details or remove it.",
+        "<b>🪙 Tracked Tokens</b>  ({})\n\n{}",
+        tokens.len(),
+        if favourites > 0 {
+            "⭐ favourites first. Tap one to manage it."
+        } else {
+            "Tap one to see details, star it, or remove it."
+        }
+    );
+    ui::render(&state.bot, surface, Screen::new(text, rows)).await
+}
+
+/// The starred tokens: a shortcut past the full list.
+///
+/// Renders the same rows the Tokens screen does, so a favourite is the same object seen
+/// through a shorter list rather than a second kind of thing to keep in sync.
+pub async fn show_favourites(state: &AppState, surface: Surface, page: usize) -> Result<()> {
+    let tokens = TokenRepo::new(&state.db).list_favourites().await?;
+
+    if tokens.is_empty() {
+        // Reachable by a stale button after the last star was cleared, so it explains
+        // how to get one rather than dead-ending.
+        let rows = vec![vec![button("🪙 Tokens", "tk")], menu_row()];
+        return ui::render(
+            &state.bot,
+            surface,
+            Screen::new(copy::EMPTY_FAVOURITES, rows),
+        )
+        .await;
+    }
+
+    let (page, visible) = paginate(&tokens, page);
+    let mut rows: Vec<Vec<InlineKeyboardButton>> = visible.iter().map(token_row).collect();
+
+    if let Some(row) = pager(FAVOURITES, page, tokens.len()) {
+        rows.push(row);
+    }
+    rows.push(back_menu("tk"));
+
+    let text = format!(
+        "<b>⭐ Favourites</b>  ({})\n\nTap one to create an alert on it or manage it.",
         tokens.len()
     );
     ui::render(&state.bot, surface, Screen::new(text, rows)).await
@@ -339,16 +413,53 @@ pub async fn show_token(state: &AppState, surface: Surface, id: i64) -> Result<(
         .unwrap_or(0);
 
     let text = format!(
-        "🪙 <b>{}</b>\n\n<b>Mint:</b>\n{}\n\n<b>Alerts:</b> {}",
+        "{} <b>{}</b>\n\n<b>Mint:</b>\n{}\n\n<b>Alerts:</b> {}{}",
+        if token.is_favourite() { "⭐" } else { "🪙" },
         esc(token.symbol.as_deref().unwrap_or("unnamed")),
         code(&token.mint_address),
-        rule_count
+        rule_count,
+        if token.is_favourite() {
+            "\n\nA favourite: it leads the token list and has its own menu shortcut."
+        } else {
+            ""
+        }
     );
+
+    // The button carries the state it wants, not "flip it", so two taps on a stale
+    // keyboard converge instead of undoing each other.
+    let star = if token.is_favourite() {
+        button("☆ Unfavourite", format!("tk:f:{id}:0"))
+    } else {
+        button("⭐ Favourite", format!("tk:f:{id}:1"))
+    };
+
     let rows = vec![
-        vec![button("🗑 Remove", format!("tk:d:{id}"))],
+        vec![star],
+        vec![
+            button("🚨 Create Alert", format!("ac:tk:{id}")),
+            button("🗑 Remove", format!("tk:d:{id}")),
+        ],
         back_menu("tk"),
     ];
     ui::render(&state.bot, surface, Screen::new(text, rows)).await
+}
+
+/// Stars or unstars a token, then redraws its detail screen from the database rather
+/// than from what the write was expected to do.
+pub async fn set_token_favourite(
+    state: &AppState,
+    surface: Surface,
+    id: i64,
+    favourite: bool,
+) -> Result<()> {
+    match TokenRepo::new(&state.db).set_favourite(id, favourite).await {
+        Ok(_) => show_token(state, surface, id).await,
+        // Tolerate a tap on a token removed elsewhere since this screen was drawn.
+        Err(crate::error::AppError::NotFound(_)) => {
+            ui::render(&state.bot, surface, notice(copy::TOKEN_GONE, "tk")).await
+        }
+        Err(err) => Err(err),
+    }
 }
 
 pub async fn confirm_delete_token(state: &AppState, surface: Surface, id: i64) -> Result<()> {

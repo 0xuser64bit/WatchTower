@@ -9,6 +9,8 @@ pub struct Token {
     pub id: i64,
     pub mint_address: String,
     pub symbol: Option<String>,
+    /// When this token was starred, if it is. See [`TokenRepo::set_favourite`].
+    pub favourited_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -19,6 +21,10 @@ impl Token {
             None => self.mint_address.clone(),
         }
     }
+
+    pub fn is_favourite(&self) -> bool {
+        self.favourited_at.is_some()
+    }
 }
 
 /// A token together with how many alert rules depend on it, so the UI can warn
@@ -28,8 +34,25 @@ pub struct TokenWithRules {
     pub id: i64,
     pub mint_address: String,
     pub symbol: Option<String>,
+    pub favourited_at: Option<DateTime<Utc>>,
     pub rule_count: i64,
 }
+
+impl TokenWithRules {
+    pub fn is_favourite(&self) -> bool {
+        self.favourited_at.is_some()
+    }
+}
+
+/// Columns of `tokens`, named explicitly so adding a column cannot silently change
+/// what a `FromRow` sees.
+const SELECT: &str = "SELECT id, mint_address, symbol, favourited_at, created_at FROM tokens";
+
+/// Favourites first, oldest star first, then everything else by insertion order.
+///
+/// Applied to every listing rather than only the favourites screen: the point of
+/// starring a token is that it stops being something to scroll past.
+const ORDER: &str = "ORDER BY favourited_at IS NULL, favourited_at ASC, id ASC";
 
 pub struct TokenRepo<'a> {
     db: &'a Db,
@@ -41,21 +64,21 @@ impl<'a> TokenRepo<'a> {
     }
 
     pub async fn find_by_mint(&self, mint: &str) -> Result<Option<Token>> {
-        Ok(sqlx::query_as::<_, Token>(
-            "SELECT id, mint_address, symbol, created_at FROM tokens WHERE mint_address = ?",
+        Ok(
+            sqlx::query_as::<_, Token>(&format!("{SELECT} WHERE mint_address = ?"))
+                .bind(mint)
+                .fetch_optional(self.db.pool())
+                .await?,
         )
-        .bind(mint)
-        .fetch_optional(self.db.pool())
-        .await?)
     }
 
     pub async fn find(&self, id: i64) -> Result<Option<Token>> {
-        Ok(sqlx::query_as::<_, Token>(
-            "SELECT id, mint_address, symbol, created_at FROM tokens WHERE id = ?",
+        Ok(
+            sqlx::query_as::<_, Token>(&format!("{SELECT} WHERE id = ?"))
+                .bind(id)
+                .fetch_optional(self.db.pool())
+                .await?,
         )
-        .bind(id)
-        .fetch_optional(self.db.pool())
-        .await?)
     }
 
     pub async fn create(&self, mint_address: &str, symbol: Option<&str>) -> Result<Token> {
@@ -78,13 +101,55 @@ impl<'a> TokenRepo<'a> {
     }
 
     pub async fn list(&self) -> Result<Vec<TokenWithRules>> {
-        Ok(sqlx::query_as::<_, TokenWithRules>(
-            "SELECT t.id, t.mint_address, t.symbol, \
+        self.collect(&format!(
+            "SELECT t.id, t.mint_address, t.symbol, t.favourited_at, \
                     (SELECT COUNT(*) FROM rules r WHERE r.token_id = t.id) AS rule_count \
-             FROM tokens t ORDER BY t.id",
+             FROM tokens t {ORDER}"
+        ))
+        .await
+    }
+
+    /// The starred tokens, in the same order they appear at the top of the full list.
+    pub async fn list_favourites(&self) -> Result<Vec<TokenWithRules>> {
+        self.collect(&format!(
+            "SELECT t.id, t.mint_address, t.symbol, t.favourited_at, \
+                    (SELECT COUNT(*) FROM rules r WHERE r.token_id = t.id) AS rule_count \
+             FROM tokens t WHERE t.favourited_at IS NOT NULL {ORDER}"
+        ))
+        .await
+    }
+
+    async fn collect(&self, sql: &str) -> Result<Vec<TokenWithRules>> {
+        Ok(sqlx::query_as::<_, TokenWithRules>(sql)
+            .fetch_all(self.db.pool())
+            .await?)
+    }
+
+    /// Stars or unstars a token.
+    ///
+    /// Idempotent, and starring an already-starred token keeps its original timestamp:
+    /// a double tap must not silently reorder the favourites list. Returns the stored
+    /// token so the caller re-renders from the database rather than from what it hoped
+    /// the write did.
+    pub async fn set_favourite(&self, id: i64, favourite: bool) -> Result<Token> {
+        let result = sqlx::query(
+            "UPDATE tokens SET favourited_at = CASE \
+                 WHEN ?1 THEN COALESCE(favourited_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')) \
+                 ELSE NULL END \
+             WHERE id = ?2",
         )
-        .fetch_all(self.db.pool())
-        .await?)
+        .bind(favourite)
+        .bind(id)
+        .execute(self.db.pool())
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound(format!("token {id}")));
+        }
+
+        self.find(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound(format!("token {id}")))
     }
 
     /// Deletes the token and, by `ON DELETE CASCADE`, every rule watching it.
@@ -115,6 +180,14 @@ impl<'a> TokenRepo<'a> {
         let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tokens")
             .fetch_one(self.db.pool())
             .await?;
+        Ok(count)
+    }
+
+    pub async fn count_favourites(&self) -> Result<i64> {
+        let (count,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM tokens WHERE favourited_at IS NOT NULL")
+                .fetch_one(self.db.pool())
+                .await?;
         Ok(count)
     }
 }

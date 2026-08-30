@@ -26,6 +26,18 @@ pub async fn list_tokens(state: AppState, msg: Message) -> HandlerResult {
     reply::finish(&state.bot, msg.chat.id, "list_tokens", outcome).await
 }
 
+pub async fn list_favourites(state: AppState, msg: Message) -> HandlerResult {
+    if reply::require_user(&state.bot, &state.db, &msg)
+        .await
+        .is_none()
+    {
+        return Ok(());
+    }
+
+    let outcome = screens::show_favourites(&state, Surface::New(msg.chat.id), 0).await;
+    reply::finish(&state.bot, msg.chat.id, "list_favourites", outcome).await
+}
+
 pub async fn delete_token(state: AppState, msg: Message, args: String) -> HandlerResult {
     if reply::require_user(&state.bot, &state.db, &msg)
         .await

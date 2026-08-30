@@ -28,6 +28,10 @@ use teloxide::prelude::*;
 pub const MAIN: &str = "m";
 pub const CANCEL: &str = "x";
 pub const NOOP: &str = "noop";
+/// The favourites screen. Named because it is referenced from three places — the main
+/// menu, the alert flow, and its own pager — and a typo in a literal would silently
+/// route to the "button has expired" arm.
+pub const FAVOURITES: &str = "fv";
 
 pub fn handler() -> UpdateHandler<Box<dyn std::error::Error + Send + Sync>> {
     Update::filter_callback_query().endpoint(handle)
@@ -132,8 +136,18 @@ async fn route(
         ["tk"] => nav_reset(dialogue, || screens::show_tokens(state, surface, 0)).await,
         ["tk", "p", n] => screens::show_tokens(state, surface, page(n)).await,
         ["tk", "v", id] => screens::show_token(state, surface, parse_id(id)?).await,
+        // Starring is a toggle, but the button carries the intended end state rather
+        // than "flip it": two taps on a stale keyboard then converge instead of
+        // undoing each other.
+        ["tk", "f", id, flag] => {
+            screens::set_token_favourite(state, surface, parse_id(id)?, parse_flag(flag)?).await
+        }
         ["tk", "d", id] => screens::confirm_delete_token(state, surface, parse_id(id)?).await,
         ["tk", "dy", id] => screens::delete_token(state, surface, parse_id(id)?).await,
+
+        // ── Favourites ────────────────────────────────────────────────────────
+        [FAVOURITES] => nav_reset(dialogue, || screens::show_favourites(state, surface, 0)).await,
+        [FAVOURITES, "p", n] => screens::show_favourites(state, surface, page(n)).await,
 
         // ── Wallets ───────────────────────────────────────────────────────────
         ["wl"] => nav_reset(dialogue, || screens::show_wallets(state, surface, 0)).await,
@@ -150,6 +164,12 @@ async fn route(
         ["ac", "new"] => {
             flows::reset(dialogue).await;
             flows::add_alert::start_on(state, dialogue, surface).await
+        }
+        // "Create Alert" on a token: enters the flow with that token already chosen.
+        // An entry point rather than an in-flow step, so it is routed here and does not
+        // consult the dialogue.
+        ["ac", "tk", id] => {
+            flows::add_alert::start_on_token(state, dialogue, surface, parse_id(id)?).await
         }
         ["at", "new"] => {
             flows::reset(dialogue).await;
@@ -252,6 +272,16 @@ fn parse_id(raw: &str) -> crate::error::Result<i64> {
 fn parse_i64(raw: &str) -> crate::error::Result<i64> {
     raw.parse::<i64>()
         .map_err(|_| crate::error::AppError::InvalidInput("bad id".into()))
+}
+
+/// A boolean carried in callback data. Only the two forms this crate emits are
+/// accepted, so a hand-crafted button cannot coerce something else into `true`.
+fn parse_flag(raw: &str) -> crate::error::Result<bool> {
+    match raw {
+        "1" => Ok(true),
+        "0" => Ok(false),
+        _ => Err(crate::error::AppError::InvalidInput("bad flag".into())),
+    }
 }
 
 fn page(raw: &str) -> usize {
